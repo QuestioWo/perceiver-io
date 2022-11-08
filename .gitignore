@@ -1,2 +1,5 @@
 .idea/
 dist/
+.cache/
+__pycache__/
+logs/
