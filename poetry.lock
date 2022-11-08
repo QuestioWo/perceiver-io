@@ -1037,7 +1037,7 @@ text = ["nltk (>=3.6)", "regex (>=2021.9.24)", "tqdm (>=4.41.0)"]
 
 [[package]]
 name = "torchvision"
-version = "0.13.1"
+version = "0.14.0"
 description = "image and video datasets and models for torch deep learning"
 category = "main"
 optional = true
