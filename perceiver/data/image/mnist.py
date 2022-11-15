@@ -1,4 +1,5 @@
 import os
+import sys
 from typing import Optional
 
 import pytorch_lightning as pl
@@ -56,7 +57,7 @@ class MNISTDataModule(pl.LightningDataModule):
     def setup(self, stage: Optional[str] = None) -> None:
         self.ds_train = self.load_dataset(split="train")
         self.ds_train.set_transform(lift_transform(self.tf_train))
-
+        
         self.ds_valid = self.load_dataset(split="test")
         self.ds_valid.set_transform(lift_transform(self.tf_valid))
 

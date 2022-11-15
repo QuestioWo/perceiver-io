@@ -45,6 +45,8 @@ transformers = {version = "4.21.*", optional = true}
 torchvision = {version = "0.14.*", optional = true}
 jsonargparse = {extras = ["signatures"], version = "4.12.*"}
 fsspec = {extras = ["s3"], version = "2022.5.0"}
+simpleitk = "^2.2.0"
+matplotlib = "^3.6.2"
 
 [tool.poetry.dev-dependencies]
 invoke = "^1.6.0"
