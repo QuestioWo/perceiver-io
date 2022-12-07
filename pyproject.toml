@@ -47,6 +47,7 @@ jsonargparse = {extras = ["signatures"], version = "4.12.*"}
 fsspec = {extras = ["s3"], version = "2022.5.0"}
 simpleitk = "^2.2.0"
 matplotlib = "^3.6.2"
+scipy = "^1.9.3"
 
 [tool.poetry.dev-dependencies]
 invoke = "^1.6.0"
