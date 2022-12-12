@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import sys
 import copy
@@ -8,14 +9,15 @@ import pytorch_lightning as pl
 import SimpleITK as sitk
 import numpy as np
 import torch
-import matplotlib.pyplot as plt
+
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 from tqdm import tqdm
+from skimage.transform import rescale
 
 from perceiver.data.segmentation.common import channels_to_last, SegmentationPreprocessor, lift_transform, coregister_scan
 
-IMAGE_SIZE = (1, 1, 1)
+IMAGE_SIZE = (300, 512, 512)
 SCAN_TO_COREGISTER_TO = None
 
 class MICCAIPreprocessor(SegmentationPreprocessor):
@@ -53,7 +55,7 @@ class MICCAILoader() :
 	
 	BASIC_DATASET_ITEM = {'label' : None, 'image' : None, 'filename' : None}
 
-	LIMIT_SCAN_COUNT = 15
+	LIMIT_SCAN_COUNT = 10
 
 	DATA_DTYPE = np.float64
 	
@@ -82,16 +84,22 @@ class MICCAILoader() :
 		self._load_data()
 
 	def _load_data(self) :
-		preprocess_data_dir_doesnt_exist = False
+		coregister_scans = False
+
 		if not os.path.exists(self.images_preprocessed_dir) :
 			os.mkdir(self.images_preprocessed_dir)
-			preprocess_data_dir_doesnt_exist = True
-		if not os.path.exists(self.labels_preprocessed_dir) :
-			os.mkdir(self.labels_preprocessed_dir)
-			preprocess_data_dir_doesnt_exist = True
+		else :
+			for i in range(self._no_files) :
+				filename = os.listdir(self.images_dir)[i]
+
+				if not filename in os.listdir(self.images_preprocessed_dir) :
+					coregister_scans = True
+					break
 
 		global IMAGE_SIZE, SCAN_TO_COREGISTER_TO
-		if preprocess_data_dir_doesnt_exist or (len(os.listdir(self.images_preprocessed_dir)) // 3 != self._no_files) :
+		if coregister_scans :
+			largest_size = 0
+
 			for i in tqdm(range(self._no_files)) :
 				filename = os.listdir(self.images_dir)[i]
 
@@ -103,14 +111,38 @@ class MICCAILoader() :
 				img_seg = torch.from_numpy(sitk.GetArrayFromImage(itk_img_seg).astype(self.DATA_DTYPE)) 
 
 				image_object = copy.copy(self.BASIC_DATASET_ITEM)
-				image_object['label'] = img_seg
-				image_object['image'] = img
+				image_object['label'] = None
+				image_object['image'] = None
 				image_object['filename'] = filename
 				self.data.append(image_object)
 
-				if (itk_img.GetWidth() * itk_img.GetHeight() * itk_img.GetDepth()) > (IMAGE_SIZE[0] * IMAGE_SIZE[1] * IMAGE_SIZE[2]) :
-					IMAGE_SIZE = (itk_img.GetWidth(), itk_img.GetHeight(), itk_img.GetDepth())
-					SCAN_TO_COREGISTER_TO = (filename, img.numpy())
+				if (itk_img.GetWidth() * itk_img.GetHeight() * itk_img.GetDepth()) > largest_size :
+					# IMAGE_SIZE = (itk_img.GetWidth(), itk_img.GetHeight(), itk_img.GetDepth())
+					SCAN_TO_COREGISTER_TO = [filename, img.numpy(), img_seg.numpy()]
+					largest_size = (itk_img.GetWidth() * itk_img.GetHeight() * itk_img.GetDepth())
+
+					if (itk_img.GetWidth() * itk_img.GetHeight() * itk_img.GetDepth()) > (IMAGE_SIZE[0] * IMAGE_SIZE[1] * IMAGE_SIZE[2]) :
+						raise ValueError("One of the files loaded is larger than the image size to be used")
+
+			print("Preparing", SCAN_TO_COREGISTER_TO[0], "for coregistration")
+
+			if SCAN_TO_COREGISTER_TO[1].shape[1] != IMAGE_SIZE[1] or SCAN_TO_COREGISTER_TO[1].shape[2] != IMAGE_SIZE[2] :
+				scale_factor = (max(IMAGE_SIZE[1], IMAGE_SIZE[2]) / min(SCAN_TO_COREGISTER_TO[1].shape[1], SCAN_TO_COREGISTER_TO[1].shape[2]))
+				scale_factor_width = int(scale_factor * SCAN_TO_COREGISTER_TO[1].shape[1])
+				scale_factor_height = int(scale_factor * SCAN_TO_COREGISTER_TO[1].shape[2])
+				scale_factor_depth = int(scale_factor * SCAN_TO_COREGISTER_TO[1].shape[0])
+				SCAN_TO_COREGISTER_TO[1] = rescale(SCAN_TO_COREGISTER_TO[1], (scale_factor_depth, scale_factor_width, scale_factor_height))
+				SCAN_TO_COREGISTER_TO[2] = rescale(SCAN_TO_COREGISTER_TO[2], (scale_factor_depth, scale_factor_width, scale_factor_height))
+
+			if np.product(SCAN_TO_COREGISTER_TO[1].shape) > np.product(np.array(IMAGE_SIZE)) :
+				raise ValueError("Scan to coregister to is too large")
+
+			if SCAN_TO_COREGISTER_TO[1].shape[0] < IMAGE_SIZE[0] :
+				diff = IMAGE_SIZE[0] - SCAN_TO_COREGISTER_TO[1].shape[0]
+				diff_top = math.ceil(diff / 2.0)
+				diff_bottom = math.floor(diff / 2.0)
+				SCAN_TO_COREGISTER_TO[1] = np.pad(SCAN_TO_COREGISTER_TO[1], ((diff_top, diff_bottom)), mode="constant")
+				SCAN_TO_COREGISTER_TO[2] = np.pad(SCAN_TO_COREGISTER_TO[2], ((diff_top, diff_bottom)), mode="constant")
 
 			print("Coregistering scans to :", SCAN_TO_COREGISTER_TO[0], "of size", IMAGE_SIZE)
 
@@ -118,43 +150,56 @@ class MICCAILoader() :
 				image_object = self.data[i]
 				img_np = img_label_np = transformation = scaling = None
 
+				print(image_object['filename'])
+
 				if image_object['filename'] != SCAN_TO_COREGISTER_TO[0] :
+					itk_img = sitk.ReadImage(os.path.join(self.images_dir, image_object['filename']))
+					img = torch.from_numpy(sitk.GetArrayFromImage(itk_img).astype(self.DATA_DTYPE))
+					itk_img_seg = sitk.ReadImage(os.path.join(self.labels_dir, image_object['filename']))
+					img_seg = torch.from_numpy(sitk.GetArrayFromImage(itk_img_seg).astype(self.DATA_DTYPE)) 
+
 					img_np, img_label_np, transformation, scaling = coregister_scan(
-						image_object['image'].numpy(),
-						image_object['label'].numpy(),
+						img,
+						img_seg,
 						SCAN_TO_COREGISTER_TO[1]
 					)
 
 					image_object['image'] = torch.from_numpy(img_np)
 					image_object['label'] = torch.from_numpy(img_label_np)
+				else :
+					image_object['image'] = torch.from_numpy(SCAN_TO_COREGISTER_TO[1])
+					image_object['label'] = torch.from_numpy(SCAN_TO_COREGISTER_TO[2])
 
-				self.data[i] = image_object
-				
-				sitk.WriteImage(sitk.GetImageFromArray(img_np), os.path.join(self.images_preprocessed_dir, image_object['filename']))
-				sitk.WriteImage(sitk.GetImageFromArray(img_label_np), os.path.join(self.labels_preprocessed_dir, image_object['filename']))
-				sitk.WriteTransform(transformation, os.path.join(self.images_preprocessed_dir, image_object['filename'].replace(".nii.gz", "_transformation.tfm")))
-				with open(os.path.join(self.images_preprocessed_dir, image_object['filename'].replace(".nii.gz", "_metadata.json")), "w") as f :
-					f.write(json.dumps({"scaling": scaling}))
-		
-		else  :
-			for i in tqdm(range(self._no_files)) :
-				filename = os.listdir(self.images_preprocessed_dir)[i]
+				sitk.WriteImage(sitk.GetImageFromArray(image_object['image'].numpy()), os.path.join(self.images_preprocessed_dir, image_object['filename']))
+				sitk.WriteImage(sitk.GetImageFromArray(image_object['label'].numpy()), os.path.join(self.labels_preprocessed_dir, image_object['filename']))
+				if transformation != None :
+					sitk.WriteTransform(transformation, os.path.join(self.images_preprocessed_dir, image_object['filename'].replace(".nii.gz", "_transformation.tfm")))
+					with open(os.path.join(self.images_preprocessed_dir, image_object['filename'].replace(".nii.gz", "_metadata.json")), "w") as f :
+						f.write(json.dumps({"scaling": scaling}))
 
-				itk_img = sitk.ReadImage(os.path.join(self.images_preprocessed_dir, filename))
-				# cast array as torch cannot convert arrays of dtype=np.uint16 and transformations require floating point data
-				img = torch.from_numpy(sitk.GetArrayFromImage(itk_img).astype(self.DATA_DTYPE))
+				image_object['label'] = None
+				image_object['image'] = None
 
-				itk_img_seg = sitk.ReadImage(os.path.join(self.labels_preprocessed_dir, filename))
-				img_seg = torch.from_numpy(sitk.GetArrayFromImage(itk_img_seg).astype(self.DATA_DTYPE)) 
+		self.data = []
 
-				image_object = copy.copy(self.BASIC_DATASET_ITEM)
-				image_object['label'] = img_seg
-				image_object['image'] = img
-				image_object['filename'] = filename
-				self.data.append(image_object)
+		for i in tqdm(range(self._no_files)) :
+			filename = list(filter(lambda x: x.endswith(".nii.gz"), os.listdir(self.images_preprocessed_dir)))[i] # check the loading
 
-				if (img.shape[0] * img.shape[1] * img.shape[2]) > (IMAGE_SIZE[0] * IMAGE_SIZE[1] * IMAGE_SIZE[2]) :
-					IMAGE_SIZE = img.shape
+			itk_img = sitk.ReadImage(os.path.join(self.images_preprocessed_dir, filename))
+			# cast array as torch cannot convert arrays of dtype=np.uint16 and transformations require floating point data
+			img = torch.from_numpy(sitk.GetArrayFromImage(itk_img).astype(self.DATA_DTYPE))
+
+			itk_img_seg = sitk.ReadImage(os.path.join(self.labels_preprocessed_dir, filename))
+			img_seg = torch.from_numpy(sitk.GetArrayFromImage(itk_img_seg).astype(self.DATA_DTYPE)) 
+
+			image_object = copy.copy(self.BASIC_DATASET_ITEM)
+			image_object['label'] = img_seg
+			image_object['image'] = img
+			image_object['filename'] = filename
+			self.data.append(image_object)
+
+			if (itk_img.GetWidth() * itk_img.GetHeight() * itk_img.GetDepth()) > (IMAGE_SIZE[0] * IMAGE_SIZE[1] * IMAGE_SIZE[2]) :
+				IMAGE_SIZE = (itk_img.GetWidth(), itk_img.GetHeight(), itk_img.GetDepth())
 			
 	def get_split(self, split) :
 		_training_split = int(self._no_files * (100 / self.TRAIN_SIZE))
@@ -228,8 +273,8 @@ class MICCAIDataModule(pl.LightningDataModule):
 		self.ds_valid = self.load_dataset(split="test")
 		self.ds_valid.set_transform(lift_transform(self.tf_valid))
 
-		for i in range(len(self.ds_train)) :
-			print(self.ds_train[i]['image'].shape)
+		# for i in range(len(self.ds_train)) :
+		# 	print(self.ds_train[i]['image'].shape)
 
 	def train_dataloader(self):
 		return DataLoader(
