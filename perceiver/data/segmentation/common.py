@@ -118,9 +118,7 @@ def coregister_scan(np_moving, np_moving_label, np_fixed) :
 	out_moving.SetSpacing(new_spacing)
 	out_moving_label.SetSpacing(new_spacing)
 
-	return (sitk.GetArrayFromImage(out_moving), sitk.GetArrayFromImage(out_moving_label), tx, scale_factor)
-	# simg1 = sitk.Cast(sitk.RescaleIntensity(fixed), sitk.sitkUInt8)
-	# simg2 = sitk.Cast(sitk.RescaleIntensity(out), sitk.sitkUInt8)
+	return (sitk.GetArrayFromImage(out_moving), sitk.GetArrayFromImage(sitk.Cast(sitk.RescaleIntensity(out_moving_label), sitk.sitkUInt8)), tx, scale_factor)
 
 
 
