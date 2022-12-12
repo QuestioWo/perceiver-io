@@ -20,7 +20,6 @@ class SegmentationMapperCLI(CLI):
                 "model.encoder.num_self_attention_layers_per_block": 6,
                 "model.encoder.num_self_attention_blocks": 8,
                 "model.encoder.dropout": 0.1,
-                "model.decoder.num_output_query_channels": 1024,
                 "model.decoder.num_cross_attention_heads": 1,
                 "model.decoder.dropout": 0.1,
             }

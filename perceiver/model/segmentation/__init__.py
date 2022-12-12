@@ -1,1 +1,1 @@
-from perceiver.model.segmentation.segmentation import ImageEncoderConfig, ImageInputAdapter
+from perceiver.model.segmentation.segmentation import SegmentationEncoderConfig, SegmentationInputAdapter
