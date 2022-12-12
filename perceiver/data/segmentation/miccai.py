@@ -88,6 +88,7 @@ class MICCAILoader() :
 
 		if not os.path.exists(self.images_preprocessed_dir) :
 			os.mkdir(self.images_preprocessed_dir)
+			coregister_scans = True
 		else :
 			for i in range(self._no_files) :
 				filename = os.listdir(self.images_dir)[i]
@@ -141,8 +142,12 @@ class MICCAILoader() :
 				diff = IMAGE_SIZE[0] - SCAN_TO_COREGISTER_TO[1].shape[0]
 				diff_top = math.ceil(diff / 2.0)
 				diff_bottom = math.floor(diff / 2.0)
-				SCAN_TO_COREGISTER_TO[1] = np.pad(SCAN_TO_COREGISTER_TO[1], ((diff_top, diff_bottom)), mode="constant")
-				SCAN_TO_COREGISTER_TO[2] = np.pad(SCAN_TO_COREGISTER_TO[2], ((diff_top, diff_bottom)), mode="constant")
+				padding_config = ((diff_top, diff_bottom), (0,0), (0,0))
+				SCAN_TO_COREGISTER_TO[1] = np.pad(SCAN_TO_COREGISTER_TO[1], padding_config, mode="constant")
+				SCAN_TO_COREGISTER_TO[2] = np.pad(SCAN_TO_COREGISTER_TO[2], padding_config, mode="constant")
+
+			if np.any(SCAN_TO_COREGISTER_TO[1].shape != np.array(IMAGE_SIZE)) :
+				raise ValueError("Scans cannot be transformed to requested shape correctly, %s != %s" % (str(SCAN_TO_COREGISTER_TO[1].shape), str(IMAGE_SIZE)))
 
 			print("Coregistering scans to :", SCAN_TO_COREGISTER_TO[0], "of size", IMAGE_SIZE)
 
