@@ -88,6 +88,7 @@ class MICCAILoader() :
 
 		if not os.path.exists(self.images_preprocessed_dir) :
 			os.mkdir(self.images_preprocessed_dir)
+			os.mkdir(self.labels_preprocessed_dir)
 			coregister_scans = True
 		else :
 			for i in range(self._no_files) :
