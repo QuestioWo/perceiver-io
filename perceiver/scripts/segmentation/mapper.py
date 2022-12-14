@@ -7,11 +7,11 @@ from perceiver.scripts.cli import CLI
 class SegmentationMapperCLI(CLI):
     def add_arguments_to_parser(self, parser: LightningArgumentParser) -> None:
         super().add_arguments_to_parser(parser)
-        parser.link_arguments("data.image_shape", "model.encoder.image_shape", apply_on="instantiate")
+        # parser.link_arguments("data.image_shape", "model.encoder.image_shape", apply_on="instantiate")
         parser.link_arguments("data.num_classes", "model.decoder.num_classes", apply_on="instantiate")
         parser.set_defaults(
             {
-                "model.num_latents": 512,
+                "model.num_latents": 1024,
                 "model.num_latent_channels": 1024,
                 "model.encoder.num_frequency_bands": 64,
                 "model.encoder.num_cross_attention_layers": 1,
