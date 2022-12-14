@@ -3,7 +3,6 @@ import os
 from dataclasses import dataclass
 from typing import Any, Optional, Tuple
 
-import pytorch_lightning as pl
 import torch.nn as nn
 import torchmetrics as tm
 import torch
@@ -22,7 +21,7 @@ from perceiver.model.core import (
 from perceiver.model.core.lightning import LitModel
 from perceiver.model.core.config import DecoderConfig, EncoderConfig, PerceiverConfig
 from perceiver.model.image.common import FourierPositionEncoding
-from perceiver.data.segmentation.miccai import IMAGE_SIZE
+from perceiver.data.segmentation.miccai import IMAGE_SIZE, NUM_CLASSES
 from perceiver.model.core.modules import OutputAdapter
 
 @dataclass
@@ -43,31 +42,41 @@ class LitMapper(LitModel):
 		super().__init__(*args, **kwargs)
 		self.loss = nn.CrossEntropyLoss() # TODO: use a dice loss instead
 		self.loss_tm = tm.Dice()
-		self.acc = tm.classification.accuracy.Accuracy(task="multiclass", num_classes=16)
+		self.acc = tm.classification.accuracy.Accuracy(task="multiclass", num_classes=NUM_CLASSES, mdmc_reduce="global")
 
 	def step(self, batch):
 		logits, y = self(batch)
-		loss = self.loss(logits, y)
-		loss_tm = self.loss_tm(logits, y) 
-		y_pred = logits.argmax(dim=-1)
+
+		# TODO: remove when making 3d
+		y: torch.Tensor = y[:,:,:,67]
+		y = y[:,:,:,None]
+
+		logits = torch.reshape(logits, [*y.shape, NUM_CLASSES])
+		logits = torch.einsum("b w h d c -> b c w h d", logits)
+		loss = self.loss(logits, y.long())
+		y_pred = logits.argmax(dim=1).int()
+		loss_dice = self.loss_tm(y_pred, y)
 		acc = self.acc(y_pred, y)
-		return loss, acc
+		return loss, acc, loss_dice
 
 	def training_step(self, batch, batch_idx):
-		loss, acc = self.step(batch)
+		loss, acc, loss_dice = self.step(batch)
 		self.log("train_loss", loss)
 		self.log("train_acc", acc, prog_bar=True)
+		self.log("train_loss_dice", loss_dice, prog_bar=True)
 		return loss
 
 	def validation_step(self, batch, batch_idx):
-		loss, acc = self.step(batch)
+		loss, acc, loss_dice = self.step(batch)
 		self.log("val_loss", loss, prog_bar=True, sync_dist=True)
 		self.log("val_acc", acc, prog_bar=True, sync_dist=True)
+		self.log("val_loss_dice", loss_dice, prog_bar=True, sync_dist=True)
 
 	def test_step(self, batch, batch_idx):
-		loss, acc = self.step(batch)
+		loss, acc, loss_dice = self.step(batch)
 		self.log("test_loss", loss, sync_dist=True)
 		self.log("test_acc", acc, sync_dist=True)
+		self.log("test_loss_dice", loss_dice, sync_dist=True)
 
 
 class SegmentationInputAdapter(InputAdapter):
@@ -76,14 +85,13 @@ class SegmentationInputAdapter(InputAdapter):
 		position_encoding = FourierPositionEncoding(spatial_shape, num_frequency_bands)
 
 		super().__init__(num_input_channels=scan_depth + position_encoding.num_position_encoding_channels())
-
 		self.image_shape = image_shape
 		self.position_encoding = position_encoding
 
 	def forward(self, x):
-		print("prior:",x.shape)
-		x = x[:,:,:,130] # TODO: remove when making 3d		
-		print("post:",x.shape)
+		# TODO: remove when making 3d
+		x = x[:,:,:,67]
+		x = x[:,:,:,None]
 		
 		b, *d = x.shape
 
@@ -92,7 +100,8 @@ class SegmentationInputAdapter(InputAdapter):
 
 		x_enc = self.position_encoding(b)
 		x = rearrange(x, "b ... c -> b (...) c")
-		return torch.cat([x, x_enc], dim=-1)
+		x = torch.cat([x, x_enc], dim=-1)
+		return x
 
 
 class SegmentationOutputAdapter(OutputAdapter):
