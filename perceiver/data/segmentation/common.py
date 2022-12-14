@@ -1,27 +1,34 @@
 import torch
 import SimpleITK as sitk
-import skimage
-import sys
+import numpy as np
+import torchvision.transforms.functional as transformsF
+import torchvision.transforms as transforms
 
 
 class SegmentationPreprocessor:
-    def __init__(self, transform):
-        self.transform = transform
+	def __init__(self, transform):
+		self.transform = transform
 
-    def preprocess(self, img):
-        return self.transform(img)
+	def preprocess(self, img):
+		return self.transform(img)
 
-    def preprocess_batch(self, img_batch):
-        return torch.stack([self.preprocess(img) for img in img_batch])
+	def preprocess_batch(self, img_batch):
+		return torch.stack([self.preprocess(img) for img in img_batch])
 
 
-def lift_transform(transform):
-    def apply(sample):
-        sample["image"] = transform(sample['image'])
-        sample["label"] = transform(sample['label'])
-        return sample
+def lift_transform(transform, normalize):
+	def apply(sample):
+		result = {}
+		
+		transform_list = [transform]
+		if normalize :
+			transform_list = [transforms.Normalize(mean=(0.5,), std=(0.5,))] + transform_list
+		
+		result["image"] = transforms.Compose(transform_list)(sample['image'])
+		result['label'] = transform(sample['label']).int()
+		return result
 
-    return apply
+	return apply
 
 
 def _command_iteration(method):
@@ -108,6 +115,7 @@ def coregister_scan(np_moving, np_moving_label, np_fixed) :
 	resampler.SetTransform(tx)
 
 	out_moving = resampler.Execute(moving)
+	resampler.SetDefaultPixelValue(0)
 	out_moving_label = resampler.Execute(moving_label)
 
 	new_spacing = [
@@ -118,10 +126,10 @@ def coregister_scan(np_moving, np_moving_label, np_fixed) :
 	out_moving.SetSpacing(new_spacing)
 	out_moving_label.SetSpacing(new_spacing)
 
-	return (sitk.GetArrayFromImage(out_moving), sitk.GetArrayFromImage(sitk.Cast(sitk.RescaleIntensity(out_moving_label), sitk.sitkUInt8)), tx, scale_factor)
+	return (sitk.GetArrayFromImage(out_moving), sitk.GetArrayFromImage(out_moving_label), tx, scale_factor)
 
 
 
 
 def channels_to_last(img: torch.Tensor):
-    return img.permute(1, 2, 0).contiguous()
+	return img.permute(1, 2, 0).contiguous()

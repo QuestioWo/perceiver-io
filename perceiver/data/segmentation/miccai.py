@@ -17,12 +17,13 @@ from skimage.transform import rescale
 
 from perceiver.data.segmentation.common import channels_to_last, SegmentationPreprocessor, lift_transform, coregister_scan
 
-IMAGE_SIZE = (300, 512, 512)
+IMAGE_SIZE = (200, 256, 256)
 SCAN_TO_COREGISTER_TO = None
+NUM_CLASSES = 16
 
 class MICCAIPreprocessor(SegmentationPreprocessor):
-	def __init__(self, normalize: bool = True, channels_last: bool = True):
-		super().__init__(miccai_transform(normalize, channels_last))
+	def __init__(self, channels_last: bool = True):
+		super().__init__(miccai_transform(channels_last))
 
 
 class MICCAIDataset(Dataset) :
@@ -55,9 +56,9 @@ class MICCAILoader() :
 	
 	BASIC_DATASET_ITEM = {'label' : None, 'image' : None, 'filename' : None}
 
-	LIMIT_SCAN_COUNT = 10
+	LIMIT_SCAN_COUNT = 20
 
-	DATA_DTYPE = np.float64
+	DATA_DTYPE = np.float32
 	
 	def __init__(self, root) :
 		self.root = root
@@ -123,21 +124,16 @@ class MICCAILoader() :
 					SCAN_TO_COREGISTER_TO = [filename, img.numpy(), img_seg.numpy()]
 					largest_size = (itk_img.GetWidth() * itk_img.GetHeight() * itk_img.GetDepth())
 
-					if (itk_img.GetWidth() * itk_img.GetHeight() * itk_img.GetDepth()) > (IMAGE_SIZE[0] * IMAGE_SIZE[1] * IMAGE_SIZE[2]) :
-						raise ValueError("One of the files loaded is larger than the image size to be used")
-
 			print("Preparing", SCAN_TO_COREGISTER_TO[0], "for coregistration")
 
 			if SCAN_TO_COREGISTER_TO[1].shape[1] != IMAGE_SIZE[1] or SCAN_TO_COREGISTER_TO[1].shape[2] != IMAGE_SIZE[2] :
 				scale_factor = (max(IMAGE_SIZE[1], IMAGE_SIZE[2]) / min(SCAN_TO_COREGISTER_TO[1].shape[1], SCAN_TO_COREGISTER_TO[1].shape[2]))
-				scale_factor_width = int(scale_factor * SCAN_TO_COREGISTER_TO[1].shape[1])
-				scale_factor_height = int(scale_factor * SCAN_TO_COREGISTER_TO[1].shape[2])
-				scale_factor_depth = int(scale_factor * SCAN_TO_COREGISTER_TO[1].shape[0])
-				SCAN_TO_COREGISTER_TO[1] = rescale(SCAN_TO_COREGISTER_TO[1], (scale_factor_depth, scale_factor_width, scale_factor_height))
-				SCAN_TO_COREGISTER_TO[2] = rescale(SCAN_TO_COREGISTER_TO[2], (scale_factor_depth, scale_factor_width, scale_factor_height))
+				print("\tScaling by:", scale_factor)
+				SCAN_TO_COREGISTER_TO[1] = rescale(SCAN_TO_COREGISTER_TO[1], scale_factor)
+				SCAN_TO_COREGISTER_TO[2] = rescale(SCAN_TO_COREGISTER_TO[2], scale_factor)
 
 			if np.product(SCAN_TO_COREGISTER_TO[1].shape) > np.product(np.array(IMAGE_SIZE)) :
-				raise ValueError("Scan to coregister to is too large")
+				raise ValueError("Scan to coregister to is too large: %s" % str(SCAN_TO_COREGISTER_TO[1].shape))
 
 			if SCAN_TO_COREGISTER_TO[1].shape[0] < IMAGE_SIZE[0] :
 				diff = IMAGE_SIZE[0] - SCAN_TO_COREGISTER_TO[1].shape[0]
@@ -177,7 +173,7 @@ class MICCAILoader() :
 					image_object['label'] = torch.from_numpy(SCAN_TO_COREGISTER_TO[2])
 
 				sitk.WriteImage(sitk.GetImageFromArray(image_object['image'].numpy()), os.path.join(self.images_preprocessed_dir, image_object['filename']))
-				sitk.WriteImage(sitk.GetImageFromArray(image_object['label'].numpy()), os.path.join(self.labels_preprocessed_dir, image_object['filename']))
+				sitk.WriteImage(sitk.Cast(sitk.GetImageFromArray(image_object['label'].numpy()), sitk.sitkUInt8), os.path.join(self.labels_preprocessed_dir, image_object['filename']))
 				if transformation != None :
 					sitk.WriteTransform(transformation, os.path.join(self.images_preprocessed_dir, image_object['filename'].replace(".nii.gz", "_transformation.tfm")))
 					with open(os.path.join(self.images_preprocessed_dir, image_object['filename'].replace(".nii.gz", "_metadata.json")), "w") as f :
@@ -196,12 +192,16 @@ class MICCAILoader() :
 			img = torch.from_numpy(sitk.GetArrayFromImage(itk_img).astype(self.DATA_DTYPE))
 
 			itk_img_seg = sitk.ReadImage(os.path.join(self.labels_preprocessed_dir, filename))
-			img_seg = torch.from_numpy(sitk.GetArrayFromImage(itk_img_seg).astype(self.DATA_DTYPE)) 
+			img_seg = torch.from_numpy(sitk.GetArrayFromImage(itk_img_seg)).float()
 
 			image_object = copy.copy(self.BASIC_DATASET_ITEM)
-			image_object['label'] = img_seg
 			image_object['image'] = img
 			image_object['filename'] = filename
+			image_object['label'] = img_seg
+			# image_object['label'] = np.zeros((NUM_CLASSES, *img_seg.shape))
+			# for current_class in range(NUM_CLASSES) :
+			# 	image_object['label'][0] = (img_seg == current_class) * 1
+			# image_object['label'] = torch.from_numpy(image_object['label'])
 			self.data.append(image_object)
 
 			if (itk_img.GetWidth() * itk_img.GetHeight() * itk_img.GetDepth()) > (IMAGE_SIZE[0] * IMAGE_SIZE[1] * IMAGE_SIZE[2]) :
@@ -244,8 +244,9 @@ class MICCAIDataModule(pl.LightningDataModule):
 		self.save_hyperparameters()
 		self.channels_last = channels_last
 
-		self.tf_train = miccai_transform(normalize, channels_last, random_crop=random_crop)
-		self.tf_valid = miccai_transform(normalize, channels_last, random_crop=None)
+		self.tf_train = miccai_transform(channels_last, random_crop=random_crop)
+		self.tf_valid = miccai_transform(channels_last, random_crop=None)
+		self.normalize_transformation = normalize
 
 		self.ds_train = None
 		self.ds_valid = None
@@ -254,7 +255,7 @@ class MICCAIDataModule(pl.LightningDataModule):
 
 	@property
 	def num_classes(self):
-		return 16
+		return NUM_CLASSES
 
 	@property
 	def image_shape(self):
@@ -274,13 +275,10 @@ class MICCAIDataModule(pl.LightningDataModule):
 
 	def setup(self, stage: Optional[str] = None) -> None:
 		self.ds_train = self.load_dataset(split="train")
-		self.ds_train.set_transform(lift_transform(self.tf_train))
+		self.ds_train.set_transform(lift_transform(self.tf_train, self.normalize_transformation))
 
 		self.ds_valid = self.load_dataset(split="test")
-		self.ds_valid.set_transform(lift_transform(self.tf_valid))
-
-		# for i in range(len(self.ds_train)) :
-		# 	print(self.ds_train[i]['image'].shape)
+		self.ds_valid.set_transform(lift_transform(self.tf_valid, self.normalize_transformation))
 
 	def train_dataloader(self):
 		return DataLoader(
@@ -301,14 +299,11 @@ class MICCAIDataModule(pl.LightningDataModule):
 		)
 
 
-def miccai_transform(normalize: bool = True, channels_last: bool = True, random_crop: Optional[int] = None):
+def miccai_transform(channels_last: bool = True, random_crop: Optional[int] = None):
 	transform_list = []
 
 	if random_crop is not None:
 		transform_list.append(transforms.RandomCrop(random_crop))
-
-	if normalize:
-		transform_list.append(transforms.Normalize(mean=(0.5,), std=(0.5,)))
 
 	if channels_last:
 		transform_list.append(channels_to_last)
