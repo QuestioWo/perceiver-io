@@ -15,15 +15,14 @@ from torchvision import transforms
 from tqdm import tqdm
 from skimage.transform import rescale
 
-from perceiver.data.segmentation.common import channels_to_last, SegmentationPreprocessor, lift_transform, coregister_scan
+from perceiver.data.segmentation.common import channels_to_last, SegmentationPreprocessor, interpolate_scan_by_scaling_factors, lift_transform, coregister_scan, ImageInfo
 
-IMAGE_SIZE = (200, 256, 256)
-SCAN_TO_COREGISTER_TO = None
+IMAGE_SIZE = (220, 256, 256)
 NUM_CLASSES = 16
 
 class MICCAIPreprocessor(SegmentationPreprocessor):
-	def __init__(self, channels_last: bool = True):
-		super().__init__(miccai_transform(channels_last))
+	def __init__(self, channels_last: bool = True, normalize: bool = True):
+		super().__init__(miccai_transform(channels_last, normalize))
 
 
 class MICCAIDataset(Dataset) :
@@ -56,9 +55,9 @@ class MICCAILoader() :
 	
 	BASIC_DATASET_ITEM = {'label' : None, 'image' : None, 'filename' : None}
 
-	LIMIT_SCAN_COUNT = 20
+	LIMIT_SCAN_COUNT = 10
 
-	DATA_DTYPE = np.float32
+	SCAN_TO_COREGISTER_TO = None
 	
 	def __init__(self, root) :
 		self.root = root
@@ -99,19 +98,18 @@ class MICCAILoader() :
 					coregister_scans = True
 					break
 
-		global IMAGE_SIZE, SCAN_TO_COREGISTER_TO
+		image_info = ImageInfo()
 		if coregister_scans :
 			largest_size = 0
 
 			for i in tqdm(range(self._no_files)) :
 				filename = os.listdir(self.images_dir)[i]
 
-				itk_img = sitk.ReadImage(os.path.join(self.images_dir, filename))
-				# cast array as torch cannot convert arrays of dtype=np.uint16 and transformations require floating point data
-				img = torch.from_numpy(sitk.GetArrayFromImage(itk_img).astype(self.DATA_DTYPE))
+				itk_img = sitk.ReadImage(os.path.join(self.images_dir, filename), sitk.sitkFloat64)
+				itk_img_seg = sitk.ReadImage(os.path.join(self.labels_dir, filename), sitk.sitkFloat64)
 
-				itk_img_seg = sitk.ReadImage(os.path.join(self.labels_dir, filename))
-				img_seg = torch.from_numpy(sitk.GetArrayFromImage(itk_img_seg).astype(self.DATA_DTYPE)) 
+				itk_img = sitk.DICOMOrient(itk_img, "RPI")
+				itk_img_seg = sitk.DICOMOrient(itk_img_seg, "RPI")
 
 				image_object = copy.copy(self.BASIC_DATASET_ITEM)
 				image_object['label'] = None
@@ -119,61 +117,119 @@ class MICCAILoader() :
 				image_object['filename'] = filename
 				self.data.append(image_object)
 
-				if (itk_img.GetWidth() * itk_img.GetHeight() * itk_img.GetDepth()) > largest_size :
-					# IMAGE_SIZE = (itk_img.GetWidth(), itk_img.GetHeight(), itk_img.GetDepth())
-					SCAN_TO_COREGISTER_TO = [filename, img.numpy(), img_seg.numpy()]
-					largest_size = (itk_img.GetWidth() * itk_img.GetHeight() * itk_img.GetDepth())
+				world_image_width = itk_img.GetWidth() * itk_img.GetSpacing()[0]
+				world_image_height = itk_img.GetHeight() * itk_img.GetSpacing()[1]
+				world_image_depth = itk_img.GetDepth() * itk_img.GetSpacing()[2]
+				image_world_volume = (world_image_width * world_image_height * world_image_depth)
 
-			print("Preparing", SCAN_TO_COREGISTER_TO[0], "for coregistration")
+				if image_world_volume > largest_size :
+					self.SCAN_TO_COREGISTER_TO = [filename, itk_img, itk_img_seg]
+					largest_size = image_world_volume
 
-			if SCAN_TO_COREGISTER_TO[1].shape[1] != IMAGE_SIZE[1] or SCAN_TO_COREGISTER_TO[1].shape[2] != IMAGE_SIZE[2] :
-				scale_factor = (max(IMAGE_SIZE[1], IMAGE_SIZE[2]) / min(SCAN_TO_COREGISTER_TO[1].shape[1], SCAN_TO_COREGISTER_TO[1].shape[2]))
-				print("\tScaling by:", scale_factor)
-				SCAN_TO_COREGISTER_TO[1] = rescale(SCAN_TO_COREGISTER_TO[1], scale_factor)
-				SCAN_TO_COREGISTER_TO[2] = rescale(SCAN_TO_COREGISTER_TO[2], scale_factor)
+				image_info.size_width_height = max(itk_img.GetWidth(), itk_img.GetHeight(), image_info.size_width_height)
+				image_info.size_depth = max(itk_img.GetDepth(), image_info.size_depth)
+				image_info.spacing_width_height = min(itk_img.GetSpacing()[0], itk_img.GetSpacing()[1], image_info.spacing_width_height)
+				image_info.spacing_depth = min(itk_img.GetSpacing()[2], image_info.spacing_depth)
+				image_info.world_size_width_height = max(world_image_height, world_image_width, image_info.world_size_width_height)
+				image_info.world_size_depth = max(world_image_depth, image_info.world_size_depth)
 
-			if np.product(SCAN_TO_COREGISTER_TO[1].shape) > np.product(np.array(IMAGE_SIZE)) :
-				raise ValueError("Scan to coregister to is too large: %s" % str(SCAN_TO_COREGISTER_TO[1].shape))
+			print("Preparing largest scan - %s - for coregistration..." % self.SCAN_TO_COREGISTER_TO[0])
+			
+			# Resample for largest scalings
+			spacing_scale_factor_width_height = (self.SCAN_TO_COREGISTER_TO[1].GetSpacing()[0] / image_info.spacing_width_height)
+			spacing_scale_factor_depth = (self.SCAN_TO_COREGISTER_TO[1].GetSpacing()[2] / image_info.spacing_depth)
+			scale_factors = (spacing_scale_factor_depth, spacing_scale_factor_width_height, spacing_scale_factor_width_height)
 
-			if SCAN_TO_COREGISTER_TO[1].shape[0] < IMAGE_SIZE[0] :
-				diff = IMAGE_SIZE[0] - SCAN_TO_COREGISTER_TO[1].shape[0]
-				diff_top = math.ceil(diff / 2.0)
-				diff_bottom = math.floor(diff / 2.0)
-				padding_config = ((diff_top, diff_bottom), (0,0), (0,0))
-				SCAN_TO_COREGISTER_TO[1] = np.pad(SCAN_TO_COREGISTER_TO[1], padding_config, mode="constant")
-				SCAN_TO_COREGISTER_TO[2] = np.pad(SCAN_TO_COREGISTER_TO[2], padding_config, mode="constant")
+			self.SCAN_TO_COREGISTER_TO[1], self.SCAN_TO_COREGISTER_TO[2] = interpolate_scan_by_scaling_factors(
+				self.SCAN_TO_COREGISTER_TO[1],
+				self.SCAN_TO_COREGISTER_TO[2],
+				scale_factors,
+				(image_info.spacing_width_height, image_info.spacing_width_height, image_info.spacing_depth)
+			)
+			
+			# Add padding to match largest world width/height/depth sizes
+			current_world_width = self.SCAN_TO_COREGISTER_TO[1].GetWidth() * self.SCAN_TO_COREGISTER_TO[1].GetSpacing()[0]
+			current_world_height = self.SCAN_TO_COREGISTER_TO[1].GetHeight() * self.SCAN_TO_COREGISTER_TO[1].GetSpacing()[1]
+			current_world_depth = self.SCAN_TO_COREGISTER_TO[1].GetDepth() * self.SCAN_TO_COREGISTER_TO[1].GetSpacing()[2]
+			
+			world_width_diff = (image_info.world_size_width_height - current_world_width)
+			world_height_diff = (image_info.world_size_width_height - current_world_height)
+			world_depth_diff = (image_info.world_size_depth - current_world_depth)
+			
+			pixel_width_diff = (world_width_diff / self.SCAN_TO_COREGISTER_TO[1].GetSpacing()[0]) / 2
+			pixel_height_diff = (world_height_diff / self.SCAN_TO_COREGISTER_TO[1].GetSpacing()[1]) / 2
+			pixel_depth_diff = (world_depth_diff / self.SCAN_TO_COREGISTER_TO[1].GetSpacing()[2]) / 2
+			if pixel_width_diff > 0 and pixel_height_diff > 0 :
+				self.SCAN_TO_COREGISTER_TO[1] = sitk.ConstantPad(
+					self.SCAN_TO_COREGISTER_TO[1],
+					padLowerBound=(math.floor(pixel_width_diff), math.floor(pixel_height_diff), math.floor(pixel_depth_diff)),
+					padUpperBound=(math.ceil(pixel_width_diff), math.ceil(pixel_height_diff), math.ceil(pixel_depth_diff)),
+					constant=-2048
+				)
+				self.SCAN_TO_COREGISTER_TO[2] = sitk.ConstantPad(
+					self.SCAN_TO_COREGISTER_TO[2],
+					padLowerBound=(math.floor(pixel_width_diff), math.floor(pixel_height_diff), math.floor(pixel_depth_diff)),
+					padUpperBound=(math.ceil(pixel_width_diff), math.ceil(pixel_height_diff), math.ceil(pixel_depth_diff)),
+					constant=-2048
+				)
 
-			if np.any(SCAN_TO_COREGISTER_TO[1].shape != np.array(IMAGE_SIZE)) :
-				raise ValueError("Scans cannot be transformed to requested shape correctly, %s != %s" % (str(SCAN_TO_COREGISTER_TO[1].shape), str(IMAGE_SIZE)))
+			# Add padding to match a scaling of IMAGE_SIZE's depth so that all scans will be scaled version of IMAGE_SIZE
+			# as coregistration makes all images the same size as what they are coregistering to - SCAN_TO_COREGISTER_TO
+			scaling_factor = (self.SCAN_TO_COREGISTER_TO[1].GetWidth() / IMAGE_SIZE[1])
+			required_depth = (IMAGE_SIZE[0] * scaling_factor)
+			if required_depth < self.SCAN_TO_COREGISTER_TO[1].GetDepth() :
+				raise ValueError("IMAGE_SIZE is too short for scans, cannot reshape without data loss: %d < %d" % (required_depth, self.SCAN_TO_COREGISTER_TO[1].GetDepth()))
+			
+			depth_diff = ((required_depth - self.SCAN_TO_COREGISTER_TO[1].GetDepth()) / 2)
+			self.SCAN_TO_COREGISTER_TO[1] = sitk.ConstantPad(self.SCAN_TO_COREGISTER_TO[1], padLowerBound=(0, 0, math.floor(depth_diff)), padUpperBound=(0, 0, math.ceil(depth_diff)))
+			self.SCAN_TO_COREGISTER_TO[2] = sitk.ConstantPad(self.SCAN_TO_COREGISTER_TO[2], padLowerBound=(0, 0, math.floor(depth_diff)), padUpperBound=(0, 0, math.ceil(depth_diff)))
 
-			print("Coregistering scans to :", SCAN_TO_COREGISTER_TO[0], "of size", IMAGE_SIZE)
+			# Interpolate back down to IMAGE_SIZE to make data smaller and faster to coregister
+			scale_factor_width_height = max(IMAGE_SIZE[1], IMAGE_SIZE[2]) / max(self.SCAN_TO_COREGISTER_TO[1].GetWidth(), self.SCAN_TO_COREGISTER_TO[1].GetHeight())
+			scale_factor_depth = IMAGE_SIZE[0] / self.SCAN_TO_COREGISTER_TO[1].GetDepth() 
+			to_image_size_scaling_factors = (scale_factor_depth, scale_factor_width_height, scale_factor_width_height)
+
+			new_spacing = [
+				sz * spc / nsz
+				for nsz, sz, spc in zip(IMAGE_SIZE[::-1], self.SCAN_TO_COREGISTER_TO[1].GetSize(), self.SCAN_TO_COREGISTER_TO[1].GetSpacing())
+			]
+
+			self.SCAN_TO_COREGISTER_TO[1], self.SCAN_TO_COREGISTER_TO[2] = interpolate_scan_by_scaling_factors(
+				self.SCAN_TO_COREGISTER_TO[1],
+				self.SCAN_TO_COREGISTER_TO[2],
+				to_image_size_scaling_factors,
+				new_spacing
+			)
+
+			print(
+				"Coregistering scans to:", self.SCAN_TO_COREGISTER_TO[0], "of size", self.SCAN_TO_COREGISTER_TO[1].GetSize(),
+				"and spacings", self.SCAN_TO_COREGISTER_TO[1].GetSpacing()
+			)
 
 			for i in tqdm(range(self._no_files)) :
 				image_object = self.data[i]
-				img_np = img_label_np = transformation = scaling = None
 
-				print(image_object['filename'])
+				itk_img = sitk.ReadImage(os.path.join(self.images_dir, image_object['filename']), sitk.sitkFloat64)
+				itk_img_seg = sitk.ReadImage(os.path.join(self.labels_dir, image_object['filename']), sitk.sitkFloat64)
 
-				if image_object['filename'] != SCAN_TO_COREGISTER_TO[0] :
-					itk_img = sitk.ReadImage(os.path.join(self.images_dir, image_object['filename']))
-					img = torch.from_numpy(sitk.GetArrayFromImage(itk_img).astype(self.DATA_DTYPE))
-					itk_img_seg = sitk.ReadImage(os.path.join(self.labels_dir, image_object['filename']))
-					img_seg = torch.from_numpy(sitk.GetArrayFromImage(itk_img_seg).astype(self.DATA_DTYPE)) 
+				itk_img = sitk.DICOMOrient(itk_img, "RPI")
+				itk_img_seg = sitk.DICOMOrient(itk_img_seg, "RPI")
 
-					img_np, img_label_np, transformation, scaling = coregister_scan(
-						img,
-						img_seg,
-						SCAN_TO_COREGISTER_TO[1]
-					)
+				# print(image_object['filename'])
+				# print("orig", itk_img.GetSize())
 
-					image_object['image'] = torch.from_numpy(img_np)
-					image_object['label'] = torch.from_numpy(img_label_np)
-				else :
-					image_object['image'] = torch.from_numpy(SCAN_TO_COREGISTER_TO[1])
-					image_object['label'] = torch.from_numpy(SCAN_TO_COREGISTER_TO[2])
+				# One scan will coregister to itself, but will be preprocessed in the same way as everythign else
+				itk_img, itk_img_seg, transformation, scaling = coregister_scan(
+					itk_img,
+					itk_img_seg,
+					self.SCAN_TO_COREGISTER_TO[1]
+				)
 
-				sitk.WriteImage(sitk.GetImageFromArray(image_object['image'].numpy()), os.path.join(self.images_preprocessed_dir, image_object['filename']))
-				sitk.WriteImage(sitk.Cast(sitk.GetImageFromArray(image_object['label'].numpy()), sitk.sitkUInt8), os.path.join(self.labels_preprocessed_dir, image_object['filename']))
+				# print("final size", itk_img.GetSize())
+
+				# Save coregistered and correctly sized images
+				sitk.WriteImage(itk_img, os.path.join(self.images_preprocessed_dir, image_object['filename']))
+				sitk.WriteImage(sitk.Cast(itk_img_seg, sitk.sitkUInt8), os.path.join(self.labels_preprocessed_dir, image_object['filename']))
 				if transformation != None :
 					sitk.WriteTransform(transformation, os.path.join(self.images_preprocessed_dir, image_object['filename'].replace(".nii.gz", "_transformation.tfm")))
 					with open(os.path.join(self.images_preprocessed_dir, image_object['filename'].replace(".nii.gz", "_metadata.json")), "w") as f :
@@ -184,32 +240,28 @@ class MICCAILoader() :
 
 		self.data = []
 
+		# Load all images
 		for i in tqdm(range(self._no_files)) :
 			filename = list(filter(lambda x: x.endswith(".nii.gz"), os.listdir(self.images_preprocessed_dir)))[i] # check the loading
 
-			itk_img = sitk.ReadImage(os.path.join(self.images_preprocessed_dir, filename))
+			itk_img = sitk.ReadImage(os.path.join(self.images_preprocessed_dir, filename), sitk.sitkFloat64)
+			itk_img = sitk.DICOMOrient(itk_img, "RPI")
 			# cast array as torch cannot convert arrays of dtype=np.uint16 and transformations require floating point data
-			img = torch.from_numpy(sitk.GetArrayFromImage(itk_img).astype(self.DATA_DTYPE))
+			img = torch.from_numpy(sitk.GetArrayFromImage(itk_img))
 
-			itk_img_seg = sitk.ReadImage(os.path.join(self.labels_preprocessed_dir, filename))
-			img_seg = torch.from_numpy(sitk.GetArrayFromImage(itk_img_seg)).float()
+			itk_img_seg = sitk.ReadImage(os.path.join(self.labels_preprocessed_dir, filename), sitk.sitkUInt8)
+			itk_img_seg = sitk.DICOMOrient(itk_img_seg, "RPI")
+			img_seg = torch.from_numpy(sitk.GetArrayFromImage(itk_img_seg))
 
 			image_object = copy.copy(self.BASIC_DATASET_ITEM)
 			image_object['image'] = img
 			image_object['filename'] = filename
 			image_object['label'] = img_seg
-			# image_object['label'] = np.zeros((NUM_CLASSES, *img_seg.shape))
-			# for current_class in range(NUM_CLASSES) :
-			# 	image_object['label'][0] = (img_seg == current_class) * 1
-			# image_object['label'] = torch.from_numpy(image_object['label'])
 			self.data.append(image_object)
-
-			if (itk_img.GetWidth() * itk_img.GetHeight() * itk_img.GetDepth()) > (IMAGE_SIZE[0] * IMAGE_SIZE[1] * IMAGE_SIZE[2]) :
-				IMAGE_SIZE = (itk_img.GetWidth(), itk_img.GetHeight(), itk_img.GetDepth())
 			
 	def get_split(self, split) :
-		_training_split = int(self._no_files * (100 / self.TRAIN_SIZE))
-		_test_split = int(self._no_files * (100 / self.TEST_SIZE))
+		_training_split = int(self._no_files * (self.TRAIN_SIZE / 100))
+		_test_split = int(self._no_files * (self.TEST_SIZE / 100))
 		_val_split = self._no_files - (_training_split + _test_split)
 
 		start_location = 0
@@ -219,10 +271,10 @@ class MICCAILoader() :
 			split_size = _training_split
 		elif split == "test" :
 			start_location = _training_split
-			split_size = _test_split
+			split_size = start_location + _test_split
 		elif split == "val" :
 			start_location = _training_split + _test_split
-			split_size = _val_split
+			split_size = start_location + _val_split
 
 		return MICCAIDataset(self.data[start_location:split_size])
 
@@ -244,9 +296,8 @@ class MICCAIDataModule(pl.LightningDataModule):
 		self.save_hyperparameters()
 		self.channels_last = channels_last
 
-		self.tf_train = miccai_transform(channels_last, random_crop=random_crop)
-		self.tf_valid = miccai_transform(channels_last, random_crop=None)
-		self.normalize_transformation = normalize
+		self.tf_train = miccai_transform(channels_last, random_crop=random_crop, normalize=normalize)
+		self.tf_valid = miccai_transform(channels_last, random_crop=None, normalize=normalize)
 
 		self.ds_train = None
 		self.ds_valid = None
@@ -275,10 +326,10 @@ class MICCAIDataModule(pl.LightningDataModule):
 
 	def setup(self, stage: Optional[str] = None) -> None:
 		self.ds_train = self.load_dataset(split="train")
-		self.ds_train.set_transform(lift_transform(self.tf_train, self.normalize_transformation))
+		self.ds_train.set_transform(lift_transform(*self.tf_train))
 
 		self.ds_valid = self.load_dataset(split="test")
-		self.ds_valid.set_transform(lift_transform(self.tf_valid, self.normalize_transformation))
+		self.ds_valid.set_transform(lift_transform(*self.tf_valid))
 
 	def train_dataloader(self):
 		return DataLoader(
@@ -299,13 +350,36 @@ class MICCAIDataModule(pl.LightningDataModule):
 		)
 
 
-def miccai_transform(channels_last: bool = True, random_crop: Optional[int] = None):
-	transform_list = []
+def miccai_transform(channels_last: bool = True, random_crop: Optional[int] = None, normalize:bool = True):
+	image_transform_list = []
+	label_transform_list = []
 
-	if random_crop is not None:
-		transform_list.append(transforms.RandomCrop(random_crop))
+	image_transform_list.append(transforms.ConvertImageDtype(torch.float32))
+
+	def convert_less_than_x_to_y(x, y) :
+		def apply(t) :
+			t[t < x] = y
+			return t
+		return apply
+
+	def convert_greater_than_x_to_y(x, y) :
+		def apply(t) :
+			t[t > x] = y
+			return t
+		return apply
+
+	# TODO: add random crop back in for 3d images
+
+	image_transform_list.append(convert_less_than_x_to_y(-1000, -1000))
+	label_transform_list.append(convert_less_than_x_to_y(0, 0))
+	label_transform_list.append(convert_greater_than_x_to_y(NUM_CLASSES-1, 0))
+
+	if normalize :
+		image_transform_list.append(transforms.Normalize(mean=(0.5,), std=(0.5,)))
+
 
 	if channels_last:
-		transform_list.append(channels_to_last)
-	
-	return transforms.Compose(transform_list)
+		image_transform_list.append(channels_to_last)
+		label_transform_list.append(channels_to_last)
+
+	return transforms.Compose(image_transform_list), transforms.Compose(label_transform_list)
