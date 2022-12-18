@@ -1,31 +1,32 @@
+from dataclasses import dataclass
+import math
+
+from typing import Tuple
+
 import torch
 import SimpleITK as sitk
 import numpy as np
-import torchvision.transforms.functional as transformsF
-import torchvision.transforms as transforms
+
+from scipy.ndimage import zoom
 
 
 class SegmentationPreprocessor:
 	def __init__(self, transform):
-		self.transform = transform
+		self.image_transform, _ = transform
 
 	def preprocess(self, img):
-		return self.transform(img)
+		return self.image_transform(img)
 
 	def preprocess_batch(self, img_batch):
 		return torch.stack([self.preprocess(img) for img in img_batch])
 
 
-def lift_transform(transform, normalize):
+def lift_transform(image_transform, label_transform):
 	def apply(sample):
 		result = {}
 		
-		transform_list = [transform]
-		if normalize :
-			transform_list = [transforms.Normalize(mean=(0.5,), std=(0.5,))] + transform_list
-		
-		result["image"] = transforms.Compose(transform_list)(sample['image'])
-		result['label'] = transform(sample['label']).int()
+		result["image"] = image_transform(sample['image'])
+		result["label"] = label_transform(sample['label'])
 		return result
 
 	return apply
@@ -51,32 +52,52 @@ def _command_multiresolution_iteration(method):
 	# print("============= Resolution Change =============")
 	pass
 
+@dataclass
+class ImageInfo :
+	size_width_height = 0
+	size_depth = 0
+	spacing_width_height = float("inf")
+	spacing_depth = float("inf")
+	world_size_width_height = 0
+	world_size_depth = 0
 
-def coregister_scan(np_moving, np_moving_label, np_fixed) :
-	fixed = sitk.GetImageFromArray(np_fixed)
+
+def interpolate_scan_by_scaling_factors(moving: sitk.Image, moving_label: sitk.Image, scaling_factors, spacings: Tuple[float, float, float]) :
+	moving_origin = moving.GetOrigin()
+	moving_direction = moving.GetDirection()
+	
+	np_moving = sitk.GetArrayFromImage(moving)
+	np_moving_label = sitk.GetArrayFromImage(moving_label)
+	
+	np_moving = zoom(np_moving, scaling_factors, mode='nearest', cval=np.min(np_moving))
+	np_moving_label = zoom(np_moving_label, scaling_factors, mode='nearest', cval=0, order=0)
+
 	moving = sitk.GetImageFromArray(np_moving)
+	moving.SetSpacing(spacings)
+	moving.SetDirection(moving_direction)
+	moving.SetOrigin(moving_origin)
+
 	moving_label = sitk.GetImageFromArray(np_moving_label)
+	moving_label.SetSpacing(spacings)
+	moving_label.SetDirection(moving_direction)
+	moving_label.SetOrigin(moving_origin)
+	return moving, moving_label
 
-	scale_factor = (max(np_fixed.shape[0], np_fixed.shape[1]) / min(np_moving.shape[1], np_moving.shape[1]))
-	scale_factor_width = int(scale_factor * moving.GetWidth())
-	scale_factor_height = int(scale_factor * moving.GetHeight())
-	scale_factor_depth = int(scale_factor * moving.GetDepth())
 
-	# The spatial definition of the images we want to use in a deep learning framework (smaller than the original).
-	new_size = (scale_factor_width, scale_factor_height, scale_factor_depth)
-	reference_image = sitk.Image(new_size, moving.GetPixelIDValue())
-	reference_image.SetOrigin(moving.GetOrigin())
-	reference_image.SetDirection(moving.GetDirection())
-	reference_image.SetSpacing(
-		[
-			sz * spc / nsz
-			for nsz, sz, spc in zip(new_size, moving.GetSize(), moving.GetSpacing())
-		]
-	)
+def coregister_scan(moving: sitk.Image, moving_label: sitk.Image, fixed: sitk.Image) -> Tuple[sitk.Image, sitk.Image, sitk.Transform, int] :
+	# Interpolate/Resample to the same spacing and size aka worldsize
+	## NOTE: assuming width and height have same spacing for simplicity
+	fixed_spacing_width_height = min(fixed.GetSpacing()[0], fixed.GetSpacing()[1])
+	spacing_scale_factor_width_height = (min(moving.GetSpacing()[0], moving.GetSpacing()[1]) / fixed_spacing_width_height)
+	spacing_scale_factor_depth = (moving.GetSpacing()[2] / fixed.GetSpacing()[2])
 
-	moving = sitk.Resample(moving, reference_image)
-	moving_label = sitk.Resample(moving_label, reference_image)
+	# Rescale using scale factors
+	scaling_factors = (spacing_scale_factor_depth, spacing_scale_factor_width_height, spacing_scale_factor_width_height)
+	moving, moving_label = interpolate_scan_by_scaling_factors(moving, moving_label, scaling_factors, (fixed_spacing_width_height, fixed_spacing_width_height, fixed.GetSpacing()[2]))
 
+	# print("post interpolation size", moving.GetSize())
+
+	# Coregister moving to fixed
 	initialTx = sitk.CenteredTransformInitializer(
 		fixed, moving, sitk.AffineTransform(fixed.GetDimension())
 	)
@@ -84,14 +105,14 @@ def coregister_scan(np_moving, np_moving_label, np_fixed) :
 	R = sitk.ImageRegistrationMethod()
 
 	R.SetShrinkFactorsPerLevel([1, 1, 1])
-	R.SetSmoothingSigmasPerLevel([2, 1, 1])
+	R.SetSmoothingSigmasPerLevel([1, 1, 1])
 
 	R.SetMetricAsJointHistogramMutualInformation(20)
 	R.MetricUseMovingImageGradientFilterOff()
 
 	R.SetOptimizerAsGradientDescent(
 		learningRate=2.0,
-		numberOfIterations=10,
+		numberOfIterations=25,
 		estimateLearningRate=R.EachIteration,
 	)
 	R.SetOptimizerScalesFromPhysicalShift()
@@ -111,24 +132,15 @@ def coregister_scan(np_moving, np_moving_label, np_fixed) :
 	resampler = sitk.ResampleImageFilter()
 	resampler.SetReferenceImage(fixed)
 	resampler.SetInterpolator(sitk.sitkLinear)
-	resampler.SetDefaultPixelValue(-2048)
+	resampler.SetDefaultPixelValue(np.min(sitk.GetArrayFromImage(moving)))
 	resampler.SetTransform(tx)
 
 	out_moving = resampler.Execute(moving)
 	resampler.SetDefaultPixelValue(0)
+	resampler.SetInterpolator(sitk.sitkNearestNeighbor)
 	out_moving_label = resampler.Execute(moving_label)
 
-	new_spacing = [
-		sz * spc / nsz
-		for nsz, sz, spc in zip(fixed.GetSize(), out_moving.GetSize(), out_moving.GetSpacing())
-	]
-
-	out_moving.SetSpacing(new_spacing)
-	out_moving_label.SetSpacing(new_spacing)
-
-	return (sitk.GetArrayFromImage(out_moving), sitk.GetArrayFromImage(out_moving_label), tx, scale_factor)
-
-
+	return (out_moving, out_moving_label, tx, {"width_height": spacing_scale_factor_width_height, "depth": spacing_scale_factor_depth})
 
 
 def channels_to_last(img: torch.Tensor):
