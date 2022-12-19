@@ -8,7 +8,6 @@ import torchmetrics as tm
 import torch
 
 from einops import rearrange
-from transformers import PerceiverConfig as _, PerceiverForImageClassificationFourier
 
 from perceiver.model.core import (
 	EncoderConfig,
@@ -24,59 +23,114 @@ from perceiver.model.image.common import FourierPositionEncoding
 from perceiver.data.segmentation.miccai import IMAGE_SIZE, NUM_CLASSES
 from perceiver.model.core.modules import OutputAdapter
 
+SLICE_INDEX_FROM, SLICE_INDEX_TO = (64, 124) # For 220,256,256 NOTE: cannot run
+SLICE_INDEX_FROM, SLICE_INDEX_TO = (48, 52) # For 165,192,192 NOTE: cannot run
+SLICE_INDEX_FROM, SLICE_INDEX_TO = (30, 40) # For 110,128,128 NOTE: can run
+
 @dataclass
 class SegmentationDecoderConfig(DecoderConfig):
-	num_output_queries: int = (IMAGE_SIZE[1] * IMAGE_SIZE[2])
+	num_output_queries: int = (IMAGE_SIZE[1] * IMAGE_SIZE[2] * (SLICE_INDEX_TO - SLICE_INDEX_FROM))
 	num_output_query_channels: int = None
-	num_classes: int = 16
+	num_classes: int = NUM_CLASSES
 
 
 @dataclass
 class SegmentationEncoderConfig(EncoderConfig):
-	image_shape: Tuple[int, int, int] = (IMAGE_SIZE[1], IMAGE_SIZE[2], 1) # TODO: make 3D
+	image_shape: Tuple[int, int, int] = (IMAGE_SIZE[1], IMAGE_SIZE[2], SLICE_INDEX_TO - SLICE_INDEX_FROM)
 	num_frequency_bands: int = 64
+
+
+class SegmentationClassificationLoss(nn.Module) :
+	def __init__(self) :
+		super().__init__()
+		self.loss_function = nn.CrossEntropyLoss()
+
+	def forward(self, logits: torch.tensor, target: torch.tensor) :
+		b, *_ = target.shape
+
+		total_loss = torch.tensor((1), device=target.device, dtype=torch.float32)
+		incorrect_loss = torch.zeros((b, 1), device=target.device, dtype=torch.float32)
+		actual_loss = torch.zeros((b, 1), device=target.device, dtype=torch.float32)
+		
+		total_actual_organ = 0
+		total_actual_background = 0
+
+		for i in range(b) :
+			curr_target = target[i]
+			curr_logits = logits[i]
+
+			background_mask = curr_target == 0
+			organ_mask = curr_target != 0
+
+			actual_classes_logits = curr_logits[:,organ_mask]
+			actual_classes_target = curr_target[organ_mask]
+
+			total_actual_organ += torch.sum(organ_mask)
+			total_actual_background += torch.sum(background_mask)
+			
+			background_classified_as_not_background_mask = torch.argmax(curr_logits[:,background_mask], axis=0) != 0
+			
+			background_incorrect_classes_logits = curr_logits[:,background_mask][:,background_classified_as_not_background_mask]
+			background_incorrect_classes_target = curr_target[background_mask][background_classified_as_not_background_mask]
+
+			fake_batched_actual_logits = actual_classes_logits.reshape([1, *actual_classes_logits.shape])
+			fake_batched_actual_target = actual_classes_target.reshape([1, *actual_classes_target.shape])
+
+			actual_loss[i] = self.loss_function(fake_batched_actual_logits, fake_batched_actual_target)
+
+			fake_batched_incorrect_logits = background_incorrect_classes_logits.reshape([1, *background_incorrect_classes_logits.shape])
+			fake_batched_incorrect_target = background_incorrect_classes_target.reshape([1, *background_incorrect_classes_target.shape])
+
+			incorrect_loss[i] = self.loss_function(fake_batched_incorrect_logits, fake_batched_incorrect_target)
+
+		actual_loss = torch.nan_to_num(actual_loss, nan=(0.0 if (total_actual_organ == 0) else 4.0))
+		incorrect_loss = torch.nan_to_num(incorrect_loss, nan=(0.0 if (total_actual_background == 0) else 4.0))
+		total_loss = (actual_loss + incorrect_loss).mean()
+
+		return total_loss
 
 
 class LitMapper(LitModel):
 	def __init__(self, *args: Any, **kwargs: Any):
 		super().__init__(*args, **kwargs)
-		self.loss = nn.CrossEntropyLoss() # TODO: use a dice loss instead
-		self.loss_tm = tm.Dice()
+		self.loss = nn.CrossEntropyLoss()
+		self.loss = SegmentationClassificationLoss()
+		self.dice = tm.Dice()
 		self.acc = tm.classification.accuracy.Accuracy(task="multiclass", num_classes=NUM_CLASSES, mdmc_reduce="global")
 
 	def step(self, batch):
 		logits, y = self(batch)
 
 		# TODO: remove when making 3d
-		y: torch.Tensor = y[:,:,:,67]
-		y = y[:,:,:,None]
+		y: torch.Tensor = y[:,:,:,SLICE_INDEX_FROM:SLICE_INDEX_TO]
+		# y = y[:,:,:,None]
 
-		logits = torch.reshape(logits, [*y.shape, NUM_CLASSES])
-		logits = torch.einsum("b w h d c -> b c w h d", logits)
+		b, *_ = y.shape
+		logits = torch.reshape(logits, [b, NUM_CLASSES, *y.shape[1:]])
 		loss = self.loss(logits, y.long())
 		y_pred = logits.argmax(dim=1).int()
-		loss_dice = self.loss_tm(y_pred, y)
+		dice = self.dice(y_pred, y)
 		acc = self.acc(y_pred, y)
-		return loss, acc, loss_dice
+		return loss, acc, dice
 
 	def training_step(self, batch, batch_idx):
-		loss, acc, loss_dice = self.step(batch)
+		loss, acc, dice = self.step(batch)
 		self.log("train_loss", loss)
 		self.log("train_acc", acc, prog_bar=True)
-		self.log("train_loss_dice", loss_dice, prog_bar=True)
+		self.log("train_dice", dice, prog_bar=True)
 		return loss
 
 	def validation_step(self, batch, batch_idx):
-		loss, acc, loss_dice = self.step(batch)
+		loss, acc, dice = self.step(batch)
 		self.log("val_loss", loss, prog_bar=True, sync_dist=True)
 		self.log("val_acc", acc, prog_bar=True, sync_dist=True)
-		self.log("val_loss_dice", loss_dice, prog_bar=True, sync_dist=True)
+		self.log("val_dice", dice, prog_bar=True, sync_dist=True)
 
 	def test_step(self, batch, batch_idx):
-		loss, acc, loss_dice = self.step(batch)
+		loss, acc, dice = self.step(batch)
 		self.log("test_loss", loss, sync_dist=True)
 		self.log("test_acc", acc, sync_dist=True)
-		self.log("test_loss_dice", loss_dice, sync_dist=True)
+		self.log("test_dice", dice, sync_dist=True)
 
 
 class SegmentationInputAdapter(InputAdapter):
@@ -90,8 +144,8 @@ class SegmentationInputAdapter(InputAdapter):
 
 	def forward(self, x):
 		# TODO: remove when making 3d
-		x = x[:,:,:,67]
-		x = x[:,:,:,None]
+		x = x[:,:,:,SLICE_INDEX_FROM:SLICE_INDEX_TO]
+		# x = x[:,:,:,None]
 		
 		b, *d = x.shape
 
