@@ -1,7 +1,7 @@
 python -m perceiver.scripts.segmentation.mapper fit \
   --optimizer=AdamW \
   --optimizer.lr=1e-3 \
-  --trainer.max_epochs=50 \
+  --trainer.max_epochs=500 \
   --trainer.logger=TensorBoardLogger \
   --trainer.logger.save_dir=logs \
   --trainer.logger.name=miccai_seg \
@@ -12,16 +12,3 @@ python -m perceiver.scripts.segmentation.mapper fit \
   --trainer.accelerator=gpu \
   --trainer.check_val_every_n_epoch=1 \
   --trainer.devices=1
-#   --lr_scheduler.warmup_steps=500 \
-#   --model.num_latents=64 \
-#   --model.num_latent_channels=128 \
-#   --model.encoder.num_frequency_bands=32 \
-#   --model.encoder.num_cross_attention_layers=2 \
-#   --model.encoder.num_self_attention_blocks=3 \
-#   --model.encoder.num_self_attention_layers_per_block=3 \
-#   --model.encoder.first_self_attention_block_shared=false \
-#   --model.encoder.dropout=0.1 \
-#   --model.encoder.init_scale=0.1 \
-#   --model.decoder.num_output_query_channels=128 \
-#   --model.decoder.dropout=0.1 \
-#   --model.decoder.init_scale=0.1 \
