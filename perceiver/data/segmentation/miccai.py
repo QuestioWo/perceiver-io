@@ -18,6 +18,8 @@ from skimage.transform import rescale
 from perceiver.data.segmentation.common import channels_to_last, SegmentationPreprocessor, interpolate_scan_by_scaling_factors, lift_transform, coregister_scan, ImageInfo
 
 IMAGE_SIZE = (220, 256, 256)
+IMAGE_SIZE = (165, 192, 192)
+IMAGE_SIZE = (110, 128, 128)
 NUM_CLASSES = 16
 
 class MICCAIPreprocessor(SegmentationPreprocessor):

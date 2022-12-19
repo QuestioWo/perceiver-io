@@ -112,7 +112,7 @@ def coregister_scan(moving: sitk.Image, moving_label: sitk.Image, fixed: sitk.Im
 
 	R.SetOptimizerAsGradientDescent(
 		learningRate=2.0,
-		numberOfIterations=25,
+		numberOfIterations=100,
 		estimateLearningRate=R.EachIteration,
 	)
 	R.SetOptimizerScalesFromPhysicalShift()
