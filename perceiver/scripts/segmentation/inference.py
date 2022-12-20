@@ -8,12 +8,15 @@ import matplotlib.pyplot as plt
 import re
 
 from matplotlib.axes import Axes
+from tqdm import tqdm
 
 from perceiver.model.segmentation.segmentation import LitSegmentationMapper, SLICE_INDEX_FROM, SLICE_INDEX_TO
 from perceiver.data.segmentation.miccai import NUM_CLASSES, MICCAIDataModule, MICCAIPreprocessor
 
 DEFAULT_SLICE = 7
 DISPLAY_DIFFS = False
+BATCH_SIZE = 1
+USE_CUDA = False
 
 def atoi(text):
 	return int(text) if text.isdigit() else text
@@ -33,7 +36,7 @@ class IndexTrackers:
 		self.preds = []
 
 		self.slices = (SLICE_INDEX_TO - SLICE_INDEX_FROM)
-		self.ind = (self.slices // 2) if DEFAULT_SLICE != None else DEFAULT_SLICE
+		self.ind = (self.slices // 2) if DEFAULT_SLICE == None else DEFAULT_SLICE
 		
 		for i in range(len(axes)) :
 			ax = self.axes[i]
@@ -77,11 +80,8 @@ class IndexTrackers:
 
 			print(self.gt_objs[i]['filename'], ":")
 			print("\texpected", np.bincount(self.gt_objs[i]['label'][SLICE_INDEX_FROM + self.ind,:,:].flatten()))
-			print("\treceived", np.bincount(self.preds[i].flatten()))
+			print("\treceived", np.bincount(self.preds[i][:, :, self.ind].flatten()))
 			print("\tdiffs, good vs bad", np.bincount(self.masks[i].flatten()))
-
-BATCH_SIZE = 1
-use_cuda = True
 
 base_logs = os.path.join('logs', 'miccai_seg')
 most_recent_version = os.path.join(base_logs, sorted(os.listdir(base_logs), key=natural_keys)[-1])
@@ -92,7 +92,7 @@ ckpt = os.path.join(most_recent_checkpoints, most_recent_ckpt)
 # Load the PyTorch Lightning module of the image classifier from a checkpoint
 model = LitSegmentationMapper.load_from_checkpoint(ckpt).model.eval()
 
-cuda = use_cuda and torch.cuda.is_available()
+cuda = USE_CUDA and torch.cuda.is_available()
 dev = "cpu"
 if cuda :
 	dev = "cuda"
@@ -111,7 +111,7 @@ imgs = miccai_preproc.preprocess_batch(imgs)
 print(imgs[0].shape)
 preds = []
 
-for i in range(len(imgs) // BATCH_SIZE) : 
+for i in tqdm(range((cols * rows) // BATCH_SIZE)) : 
 	with torch.no_grad():
 		if BATCH_SIZE == 1 :
 			raw_imgs = [imgs[i]]
@@ -120,7 +120,8 @@ for i in range(len(imgs) // BATCH_SIZE) :
 		inputs = torch.stack(raw_imgs)
 
 		logits = model(inputs.to(device=dev))
-		logits = torch.reshape(logits, [BATCH_SIZE, NUM_CLASSES, *inputs[0].shape[:-1], (SLICE_INDEX_TO - SLICE_INDEX_FROM)])
+		logits = torch.reshape(logits, [BATCH_SIZE, *inputs[0].shape[:-1], (SLICE_INDEX_TO - SLICE_INDEX_FROM), NUM_CLASSES])
+		logits = torch.einsum("b w h d c -> b c w h d", logits)
 		predictions = logits.argmax(dim=1).int().numpy(force=True)
 		preds.append(*predictions)
 	
