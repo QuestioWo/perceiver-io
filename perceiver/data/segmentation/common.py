@@ -9,6 +9,7 @@ import numpy as np
 
 from scipy.ndimage import zoom
 
+GRADIENT_DESCENT_ITERATIONS = 500
 
 class SegmentationPreprocessor:
 	def __init__(self, transform):
@@ -112,7 +113,7 @@ def coregister_scan(moving: sitk.Image, moving_label: sitk.Image, fixed: sitk.Im
 
 	R.SetOptimizerAsGradientDescent(
 		learningRate=2.0,
-		numberOfIterations=100,
+		numberOfIterations=GRADIENT_DESCENT_ITERATIONS,
 		estimateLearningRate=R.EachIteration,
 	)
 	R.SetOptimizerScalesFromPhysicalShift()
