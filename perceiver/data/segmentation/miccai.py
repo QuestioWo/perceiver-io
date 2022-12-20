@@ -57,7 +57,7 @@ class MICCAILoader() :
 	
 	BASIC_DATASET_ITEM = {'label' : None, 'image' : None, 'filename' : None}
 
-	LIMIT_SCAN_COUNT = 10
+	LIMIT_SCAN_COUNT = 10000
 
 	SCAN_TO_COREGISTER_TO = None
 	
