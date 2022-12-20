@@ -1,3 +1,5 @@
+import copy
+
 import numpy as np
 import torch.nn.functional as F
 import torch
@@ -30,24 +32,37 @@ for w in tqdm(range(labels[0].shape[0])) :
 		for d in range(labels[0].shape[2]) :
 			labels_classified[0,w,h,d] = F.one_hot(torch.arange(NUM_CLASSES))[labels[0,w,h,d]]
 
+tampered_labels_classified = copy.deepcopy(labels_classified)
+tampered_labels_classified[0,10:20,10:20,3:4] = F.one_hot(torch.arange(NUM_CLASSES))[15]
+
 labels_classified = np.einsum("b w h d c -> b c w h d", labels_classified)
+tampered_labels_classified = np.einsum("b w h d c -> b c w h d", tampered_labels_classified)
 t_labels_classified = torch.from_numpy(labels_classified)
+t_tampered_labels_classified = torch.from_numpy(tampered_labels_classified)
 print("tensor classificatoin shape", t_labels_classified.shape)
 
 y_pred = t_labels_classified.argmax(dim=1)
 print("y pred shape", y_pred.shape)
 print("first diff val", (t_gt_label.flatten().long() - y_pred.flatten().int())[0])
-print("diff bincount", np.bincount(t_gt_label.flatten().long() - y_pred.flatten().int()))
+print("diff bincount", np.bincount((t_gt_label.flatten().long() - y_pred.flatten().int()).abs()))
 
 loss_function = SegmentationClassificationLoss()
 
-t_labels_classified = t_labels_classified.flatten(2).float()
+t_labels_classified = t_labels_classified.float()#.flatten(2)
 print("flattened labels classified shape", t_labels_classified.shape)
-t_gt_label = t_gt_label.flatten(1).long()
+t_gt_label = t_gt_label.long()#.flatten(1)
 print("flattened gtlabels classified shape", t_gt_label.shape)
 
 result = loss_function.forward(t_labels_classified, t_gt_label)
 
-print("result", result)
-print("result shape", result.shape)
-print("result item", result.item())
+print("result untampered", result)
+print("result untampered shape", result.shape)
+print("result untampered item", result.item())
+
+
+result = loss_function.forward(t_tampered_labels_classified, t_gt_label)
+
+print("result tampered", result)
+print("result tampered shape", result.shape)
+print("result tampered item", result.item())
+
