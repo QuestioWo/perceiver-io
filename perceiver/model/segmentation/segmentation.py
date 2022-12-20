@@ -66,26 +66,26 @@ class SegmentationClassificationLoss(nn.Module) :
 			actual_classes_target = curr_target[organ_mask]
 
 			total_actual_organ += torch.sum(organ_mask)
-			total_actual_background += torch.sum(background_mask)
 			
 			background_classified_as_not_background_mask = torch.argmax(curr_logits[:,background_mask], axis=0) != 0
+
+			total_actual_background += sum(background_classified_as_not_background_mask)
 			
 			background_incorrect_classes_logits = curr_logits[:,background_mask][:,background_classified_as_not_background_mask]
 			background_incorrect_classes_target = curr_target[background_mask][background_classified_as_not_background_mask]
 
 			fake_batched_actual_logits = actual_classes_logits.reshape([1, *actual_classes_logits.shape])
 			fake_batched_actual_target = actual_classes_target.reshape([1, *actual_classes_target.shape])
-
 			actual_loss[i] = self.loss_function(fake_batched_actual_logits, fake_batched_actual_target)
 
 			fake_batched_incorrect_logits = background_incorrect_classes_logits.reshape([1, *background_incorrect_classes_logits.shape])
 			fake_batched_incorrect_target = background_incorrect_classes_target.reshape([1, *background_incorrect_classes_target.shape])
-
 			incorrect_loss[i] = self.loss_function(fake_batched_incorrect_logits, fake_batched_incorrect_target)
 
 		actual_loss = torch.nan_to_num(actual_loss, nan=(0.0 if (total_actual_organ == 0) else 4.0))
 		incorrect_loss = torch.nan_to_num(incorrect_loss, nan=(0.0 if (total_actual_background == 0) else 4.0))
-		total_loss = (actual_loss + incorrect_loss).mean()
+		joined = torch.cat((actual_loss, incorrect_loss))
+		total_loss = joined.mean()
 
 		return total_loss
 
@@ -106,7 +106,8 @@ class LitMapper(LitModel):
 		# y = y[:,:,:,None]
 
 		b, *_ = y.shape
-		logits = torch.reshape(logits, [b, NUM_CLASSES, *y.shape[1:]])
+		logits = torch.reshape(logits, [b, *y.shape[1:], NUM_CLASSES])
+		logits = torch.einsum("b w h d c -> b c w h d", logits)
 		loss = self.loss(logits, y.long())
 		y_pred = logits.argmax(dim=1).int()
 		dice = self.dice(y_pred, y)
