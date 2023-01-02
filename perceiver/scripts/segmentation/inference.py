@@ -13,7 +13,7 @@ from tqdm import tqdm
 from perceiver.model.segmentation.segmentation import LitSegmentationMapper, SLICE_INDEX_FROM, SLICE_INDEX_TO
 from perceiver.data.segmentation.miccai import NUM_CLASSES, MICCAIDataModule, MICCAIPreprocessor
 
-DEFAULT_SLICE = 7
+DEFAULT_SLICE = 4
 DISPLAY_DIFFS = False
 BATCH_SIZE = 1
 USE_CUDA = False

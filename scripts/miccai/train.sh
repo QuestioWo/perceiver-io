@@ -1,14 +1,14 @@
 python -m perceiver.scripts.segmentation.mapper fit \
   --optimizer=AdamW \
   --optimizer.lr=1e-3 \
-  --trainer.max_epochs=500 \
+  --trainer.max_epochs=50000 \
   --trainer.logger=TensorBoardLogger \
   --trainer.logger.save_dir=logs \
   --trainer.logger.name=miccai_seg \
   --data=MICCAIDataModule \
   --data.batch_size=1 \
   --trainer.log_every_n_steps=2 \
-  --data.num_workers=0 \
-  --trainer.accelerator=gpu \
+  --data.num_workers=8 \
   --trainer.check_val_every_n_epoch=1 \
+  --trainer.accelerator=gpu \
   --trainer.devices=1

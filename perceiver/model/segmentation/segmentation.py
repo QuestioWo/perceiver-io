@@ -26,6 +26,7 @@ from perceiver.model.core.modules import OutputAdapter
 SLICE_INDEX_FROM, SLICE_INDEX_TO = (64, 124) # For 220,256,256 NOTE: cannot run
 SLICE_INDEX_FROM, SLICE_INDEX_TO = (48, 52) # For 165,192,192 NOTE: cannot run
 SLICE_INDEX_FROM, SLICE_INDEX_TO = (30, 40) # For 110,128,128 NOTE: can run
+SLICE_INDEX_FROM, SLICE_INDEX_TO = (15, 20) # For 55,64,64 NOTE: can run
 
 @dataclass
 class SegmentationDecoderConfig(DecoderConfig):
