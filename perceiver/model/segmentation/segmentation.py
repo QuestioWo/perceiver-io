@@ -26,7 +26,7 @@ from perceiver.model.core.modules import OutputAdapter
 SLICE_INDEX_FROM, SLICE_INDEX_TO = (64, 124) # For 220,256,256 NOTE: cannot run
 SLICE_INDEX_FROM, SLICE_INDEX_TO = (48, 52) # For 165,192,192 NOTE: cannot run
 SLICE_INDEX_FROM, SLICE_INDEX_TO = (30, 40) # For 110,128,128 NOTE: can run
-SLICE_INDEX_FROM, SLICE_INDEX_TO = (15, 20) # For 55,64,64 NOTE: can run
+SLICE_INDEX_FROM, SLICE_INDEX_TO = (18, 19) # For 55,64,64 NOTE: can run
 
 @dataclass
 class SegmentationDecoderConfig(DecoderConfig):
@@ -40,62 +40,50 @@ class SegmentationEncoderConfig(EncoderConfig):
 	image_shape: Tuple[int, int, int] = (IMAGE_SIZE[1], IMAGE_SIZE[2], SLICE_INDEX_TO - SLICE_INDEX_FROM)
 	num_frequency_bands: int = 64
 
+class DiceLoss(nn.Module):
+    def __init__(self, n_classes):
+        super(DiceLoss, self).__init__()
+        self.n_classes = n_classes
 
-class SegmentationClassificationLoss(nn.Module) :
-	def __init__(self) :
-		super().__init__()
-		self.loss_function = nn.CrossEntropyLoss()
+    def _one_hot_encoder(self, input_tensor):
+        tensor_list = []
+        for i in range(self.n_classes):
+            temp_prob = input_tensor == i  # * torch.ones_like(input_tensor)
+            tensor_list.append(temp_prob.unsqueeze(1))
+        output_tensor = torch.cat(tensor_list, dim=1)
+        return output_tensor.float()
 
-	def forward(self, logits: torch.tensor, target: torch.tensor) :
-		b, *_ = target.shape
+    def _dice_loss(self, score, target):
+        target = target.float()
+        smooth = 1e-5
+        intersect = torch.sum(score * target)
+        y_sum = torch.sum(target * target)
+        z_sum = torch.sum(score * score)
+        loss = (2 * intersect + smooth) / (z_sum + y_sum + smooth)
+        loss = 1 - loss
+        return loss
 
-		total_loss = torch.tensor((1), device=target.device, dtype=torch.float32)
-		incorrect_loss = torch.zeros((b, 1), device=target.device, dtype=torch.float32)
-		actual_loss = torch.zeros((b, 1), device=target.device, dtype=torch.float32)
-		
-		total_actual_organ = 0
-		total_actual_background = 0
-
-		for i in range(b) :
-			curr_target = target[i]
-			curr_logits = logits[i]
-
-			background_mask = curr_target == 0
-			organ_mask = curr_target != 0
-
-			actual_classes_logits = curr_logits[:,organ_mask]
-			actual_classes_target = curr_target[organ_mask]
-
-			total_actual_organ += torch.sum(organ_mask)
-			
-			background_classified_as_not_background_mask = torch.argmax(curr_logits[:,background_mask], axis=0) != 0
-
-			total_actual_background += sum(background_classified_as_not_background_mask)
-			
-			background_incorrect_classes_logits = curr_logits[:,background_mask][:,background_classified_as_not_background_mask]
-			background_incorrect_classes_target = curr_target[background_mask][background_classified_as_not_background_mask]
-
-			fake_batched_actual_logits = actual_classes_logits.reshape([1, *actual_classes_logits.shape])
-			fake_batched_actual_target = actual_classes_target.reshape([1, *actual_classes_target.shape])
-			actual_loss[i] = self.loss_function(fake_batched_actual_logits, fake_batched_actual_target)
-
-			fake_batched_incorrect_logits = background_incorrect_classes_logits.reshape([1, *background_incorrect_classes_logits.shape])
-			fake_batched_incorrect_target = background_incorrect_classes_target.reshape([1, *background_incorrect_classes_target.shape])
-			incorrect_loss[i] = self.loss_function(fake_batched_incorrect_logits, fake_batched_incorrect_target)
-
-		actual_loss = torch.nan_to_num(actual_loss, nan=(0.0 if (total_actual_organ == 0) else 4.0))
-		incorrect_loss = torch.nan_to_num(incorrect_loss, nan=(0.0 if (total_actual_background == 0) else 4.0))
-		joined = torch.cat((actual_loss, incorrect_loss))
-		total_loss = joined.mean()
-
-		return total_loss
-
+    def forward(self, inputs, target, weight=None, softmax=False):
+        if softmax:
+            inputs = torch.softmax(inputs, dim=1)
+        target = self._one_hot_encoder(target)
+        if weight is None:
+            weight = [1] * self.n_classes
+        assert inputs.size() == target.size(), 'predict {} & target {} shape do not match'.format(inputs.size(), target.size())
+        class_wise_dice = []
+        loss = 0.0
+        for i in range(0, self.n_classes):
+            dice = self._dice_loss(inputs[:, i], target[:, i])
+            class_wise_dice.append(1.0 - dice.item())
+            loss += dice * weight[i]
+        return loss / self.n_classes
 
 class LitMapper(LitModel):
 	def __init__(self, *args: Any, **kwargs: Any):
 		super().__init__(*args, **kwargs)
-		self.loss = nn.CrossEntropyLoss()
-		self.loss = SegmentationClassificationLoss()
+		self.ce_loss = nn.CrossEntropyLoss()
+		self.dice_loss = DiceLoss(NUM_CLASSES)
+		# self.loss = SegmentationClassificationLoss()
 		self.dice = tm.Dice()
 		self.acc = tm.classification.accuracy.Accuracy(task="multiclass", num_classes=NUM_CLASSES, mdmc_reduce="global")
 
@@ -109,11 +97,15 @@ class LitMapper(LitModel):
 		b, *_ = y.shape
 		logits = torch.reshape(logits, [b, *y.shape[1:], NUM_CLASSES])
 		logits = torch.einsum("b w h d c -> b c w h d", logits)
-		loss = self.loss(logits, y.long())
+		
+		ce_loss = self.ce_loss(logits, y.long())
+		dice_loss = self.dice_loss(logits, y.long(), softmax=True)
+		loss = 0.4 * ce_loss + 0.6 * dice_loss
+
 		y_pred = logits.argmax(dim=1).int()
-		dice = self.dice(y_pred, y)
-		acc = self.acc(y_pred, y)
-		return loss, acc, dice
+		dice_acc = self.dice(y_pred, y)
+		raw_acc = self.acc(y_pred, y)
+		return loss, raw_acc, dice_acc
 
 	def training_step(self, batch, batch_idx):
 		loss, acc, dice = self.step(batch)

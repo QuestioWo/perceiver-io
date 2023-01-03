@@ -10,5 +10,9 @@ trainer:
       filename: '{epoch:03d}-{val_loss:.3f}'
       mode: min
       save_weights_only: true
+      save_last: true
+      save_top_k: 50
+      every_n_epochs: 5
+      save_on_train_epoch_end: false
   default_root_dir: logs
   strategy: ddp_find_unused_parameters_false

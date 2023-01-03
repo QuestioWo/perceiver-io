@@ -13,10 +13,11 @@ from tqdm import tqdm
 from perceiver.model.segmentation.segmentation import LitSegmentationMapper, SLICE_INDEX_FROM, SLICE_INDEX_TO
 from perceiver.data.segmentation.miccai import NUM_CLASSES, MICCAIDataModule, MICCAIPreprocessor
 
-DEFAULT_SLICE = 4
-DISPLAY_DIFFS = False
+DEFAULT_SLICE = 0
+DISPLAY_DIFFS = True
 BATCH_SIZE = 1
 USE_CUDA = False
+COLS, ROWS = 3, 3
 
 def atoi(text):
 	return int(text) if text.isdigit() else text
@@ -81,7 +82,7 @@ class IndexTrackers:
 			print(self.gt_objs[i]['filename'], ":")
 			print("\texpected", np.bincount(self.gt_objs[i]['label'][SLICE_INDEX_FROM + self.ind,:,:].flatten()))
 			print("\treceived", np.bincount(self.preds[i][:, :, self.ind].flatten()))
-			print("\tdiffs, good vs bad", np.bincount(self.masks[i].flatten()))
+			print("\tdiffs, good vs bad", np.bincount(self.masks[i][:,:,self.ind].flatten()), "accuracy :=", 1 - (np.sum(self.masks[i][:,:,self.ind]) / self.masks[i][:,:,self.ind].flatten().shape[0]))
 
 base_logs = os.path.join('logs', 'miccai_seg')
 most_recent_version = os.path.join(base_logs, sorted(os.listdir(base_logs), key=natural_keys)[-1])
@@ -104,14 +105,13 @@ data_module = MICCAIDataModule(root="AMOS22")
 segmentation_dataset = data_module.load_dataset()
 miccai_preproc = MICCAIPreprocessor()
 
-cols, rows = 3, 3
-imgs = [segmentation_dataset[i]['image'] for i in range(cols * rows)]
+imgs = [segmentation_dataset[i]['image'] for i in range(COLS * ROWS)]
 print(imgs[0].shape)
 imgs = miccai_preproc.preprocess_batch(imgs)
 print(imgs[0].shape)
 preds = []
 
-for i in tqdm(range((cols * rows) // BATCH_SIZE)) : 
+for i in tqdm(range((COLS * ROWS) // BATCH_SIZE)) : 
 	with torch.no_grad():
 		if BATCH_SIZE == 1 :
 			raw_imgs = [imgs[i]]
@@ -127,9 +127,9 @@ for i in tqdm(range((cols * rows) // BATCH_SIZE)) :
 	
 preds = np.array(preds)
 
-fig, axes = plt.subplots(rows, cols)
+fig, axes = plt.subplots(ROWS, COLS)
 axes = axes.flatten()
-all_labels = np.einsum("b d w h -> b w h d", np.array([segmentation_dataset[i]['label'][SLICE_INDEX_FROM:SLICE_INDEX_TO,:,:].numpy(force=True) for i in range(cols*rows)]))
+all_labels = np.einsum("b d w h -> b w h d", np.array([segmentation_dataset[i]['label'][SLICE_INDEX_FROM:SLICE_INDEX_TO,:,:].numpy(force=True) for i in range(COLS*ROWS)]))
 print(all_labels.shape)
 diffs = np.ones_like(preds) * (preds != all_labels)
 print(preds.shape)

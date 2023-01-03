@@ -52,6 +52,7 @@ class MICCAILoader() :
 	IMAGES_TR_PREPROCESSED = "imagesTr_preprocessed"
 	LABELS_TR_PREPROCESSED = "labelsTr_preprocessed"
 	
+	# NOTE: it appears that the train and test sets are combined for training epochs
 	TRAIN_SIZE = 60
 	TEST_SIZE = 20
 	# VAL_SIZE = 20 # the rest
