@@ -14,10 +14,11 @@ from perceiver.model.segmentation.segmentation import LitSegmentationMapper, SLI
 from perceiver.data.segmentation.miccai import NUM_CLASSES, MICCAIDataModule, MICCAIPreprocessor
 
 DEFAULT_SLICE = 0
-DISPLAY_DIFFS = True
+DISPLAY_DIFFS = False
 BATCH_SIZE = 1
-USE_CUDA = False
+USE_CUDA = True
 COLS, ROWS = 3, 3
+USE_LAST_CHECKPOINT = True
 
 def atoi(text):
 	return int(text) if text.isdigit() else text
@@ -87,8 +88,15 @@ class IndexTrackers:
 base_logs = os.path.join('logs', 'miccai_seg')
 most_recent_version = os.path.join(base_logs, sorted(os.listdir(base_logs), key=natural_keys)[-1])
 most_recent_checkpoints = os.path.join(most_recent_version, 'checkpoints')
-most_recent_ckpt = os.listdir(most_recent_checkpoints)[0]
-ckpt = os.path.join(most_recent_checkpoints, most_recent_ckpt)
+all_ckpts = list(filter(lambda x: x.startswith("epoch"), os.listdir(most_recent_checkpoints)))
+sorted_ckpts = sorted(all_ckpts, key=lambda x: float(x.split("val_loss=")[-1].split(".ckpt")[0]))
+best_ckpt = sorted_ckpts[0]
+ckpt = os.path.join(most_recent_checkpoints, best_ckpt)
+
+if USE_LAST_CHECKPOINT :
+    ckpt = os.path.join(most_recent_checkpoints, "last.ckpt")
+
+print("Loading %s checkpoint file" % (ckpt))
 
 # Load the PyTorch Lightning module of the image classifier from a checkpoint
 model = LitSegmentationMapper.load_from_checkpoint(ckpt).model.eval()
@@ -98,14 +106,16 @@ dev = "cpu"
 if cuda :
 	dev = "cuda"
 	print("Using CUDA device")
+else :
+    print("Using CPU")
 
 model.to(device=dev)
 
 data_module = MICCAIDataModule(root="AMOS22")
-segmentation_dataset = data_module.load_dataset()
+segmentation_dataset = data_module.load_dataset("val")
 miccai_preproc = MICCAIPreprocessor()
 
-imgs = [segmentation_dataset[i]['image'] for i in range(COLS * ROWS)]
+imgs = [segmentation_dataset[-i]['image'] for i in range(COLS * ROWS)]
 print(imgs[0].shape)
 imgs = miccai_preproc.preprocess_batch(imgs)
 print(imgs[0].shape)

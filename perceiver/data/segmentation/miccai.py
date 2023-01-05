@@ -20,7 +20,7 @@ from perceiver.data.segmentation.common import channels_to_last, SegmentationPre
 IMAGE_SIZE = (220, 256, 256)
 IMAGE_SIZE = (165, 192, 192)
 IMAGE_SIZE = (110, 128, 128)
-IMAGE_SIZE = (55, 64, 64)
+# IMAGE_SIZE = (55, 64, 64)
 NUM_CLASSES = 16
 
 class MICCAIPreprocessor(SegmentationPreprocessor):
