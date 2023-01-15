@@ -71,7 +71,7 @@ def interpolate_scan_by_scaling_factors(moving: sitk.Image, moving_label: sitk.I
 	np_moving_label = sitk.GetArrayFromImage(moving_label)
 	
 	np_moving = zoom(np_moving, scaling_factors, mode='nearest', cval=np.min(np_moving))
-	np_moving_label = zoom(np_moving_label, scaling_factors, mode='nearest', cval=0, order=0)
+	np_moving_label = zoom(np_moving_label, scaling_factors, mode='nearest', cval=0)
 
 	moving = sitk.GetImageFromArray(np_moving)
 	moving.SetSpacing(spacings)
@@ -132,13 +132,14 @@ def coregister_scan(moving: sitk.Image, moving_label: sitk.Image, fixed: sitk.Im
 
 	resampler = sitk.ResampleImageFilter()
 	resampler.SetReferenceImage(fixed)
-	resampler.SetInterpolator(sitk.sitkLinear)
-	resampler.SetDefaultPixelValue(np.min(sitk.GetArrayFromImage(moving)))
 	resampler.SetTransform(tx)
 
+	resampler.SetInterpolator(sitk.sitkLinear)
+	resampler.SetDefaultPixelValue(np.min(sitk.GetArrayFromImage(moving)))
 	out_moving = resampler.Execute(moving)
-	resampler.SetDefaultPixelValue(0)
+
 	resampler.SetInterpolator(sitk.sitkNearestNeighbor)
+	resampler.SetDefaultPixelValue(0)
 	out_moving_label = resampler.Execute(moving_label)
 
 	return (out_moving, out_moving_label, tx, {"width_height": spacing_scale_factor_width_height, "depth": spacing_scale_factor_depth})
