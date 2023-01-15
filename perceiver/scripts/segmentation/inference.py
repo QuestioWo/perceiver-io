@@ -14,11 +14,11 @@ from perceiver.model.segmentation.segmentation import LitSegmentationMapper, SLI
 from perceiver.data.segmentation.miccai import NUM_CLASSES, MICCAIDataModule, MICCAIPreprocessor
 
 DEFAULT_SLICE = 0
-DISPLAY_DIFFS = False
+DISPLAY_DIFFS = True
 BATCH_SIZE = 1
 USE_CUDA = True
 COLS, ROWS = 3, 3
-USE_LAST_CHECKPOINT = True
+USE_LAST_CHECKPOINT = False
 
 def atoi(text):
 	return int(text) if text.isdigit() else text
@@ -46,6 +46,7 @@ class IndexTrackers:
 			gt_obj = segmentation_dataset[i]
 
 			ax.set_title('file: %s' % (str(gt_obj['filename'])))
+			ax.set_aspect(1)
 
 			self.imgs.append(imgs[i])
 			self.preds.append(preds[i])
@@ -115,7 +116,9 @@ data_module = MICCAIDataModule(root="AMOS22")
 segmentation_dataset = data_module.load_dataset("val")
 miccai_preproc = MICCAIPreprocessor()
 
-imgs = [segmentation_dataset[-i]['image'] for i in range(COLS * ROWS)]
+segmentation_objects = [segmentation_dataset[-i] for i in range(COLS * ROWS)]
+
+imgs = [segmentation_objects[i]['image'] for i in range(len(segmentation_objects))]
 print(imgs[0].shape)
 imgs = miccai_preproc.preprocess_batch(imgs)
 print(imgs[0].shape)
@@ -129,23 +132,25 @@ for i in tqdm(range((COLS * ROWS) // BATCH_SIZE)) :
 			raw_imgs = imgs[i:i+BATCH_SIZE]
 		inputs = torch.stack(raw_imgs)
 
-		logits = model(inputs.to(device=dev))
-		logits = torch.reshape(logits, [BATCH_SIZE, *inputs[0].shape[:-1], (SLICE_INDEX_TO - SLICE_INDEX_FROM), NUM_CLASSES])
-		logits = torch.einsum("b w h d c -> b c w h d", logits)
-		predictions = logits.argmax(dim=1).int().numpy(force=True)
+		# logits = model(inputs.to(device=dev))
+		# logits = torch.reshape(logits, [BATCH_SIZE, *inputs[0].shape[:-1], (SLICE_INDEX_TO - SLICE_INDEX_FROM), NUM_CLASSES])
+		# logits = torch.einsum("b w h d c -> b c w h d", logits)
+		# predictions = logits.argmax(dim=1).int().numpy(force=True)
+
+		predictions = np.zeros((BATCH_SIZE, imgs.shape[1], imgs.shape[2], (SLICE_INDEX_TO - SLICE_INDEX_FROM)), dtype=np.int64)
 		preds.append(*predictions)
 	
 preds = np.array(preds)
 
 fig, axes = plt.subplots(ROWS, COLS)
 axes = axes.flatten()
-all_labels = np.einsum("b d w h -> b w h d", np.array([segmentation_dataset[i]['label'][SLICE_INDEX_FROM:SLICE_INDEX_TO,:,:].numpy(force=True) for i in range(COLS*ROWS)]))
+all_labels = np.einsum("b d w h -> b w h d", np.array([segmentation_objects[i]['label'][SLICE_INDEX_FROM:SLICE_INDEX_TO,:,:].numpy(force=True) for i in range(len(segmentation_objects))]))
 print(all_labels.shape)
 diffs = np.ones_like(preds) * (preds != all_labels)
 print(preds.shape)
 print(diffs.shape)
 
-tracker = IndexTrackers(axes, imgs, preds, diffs, segmentation_dataset)
+tracker = IndexTrackers(axes, imgs, preds, diffs, segmentation_objects)
 fig.canvas.mpl_connect('scroll_event', tracker.on_scroll)
 
 plt.show()
