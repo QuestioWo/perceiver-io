@@ -66,14 +66,14 @@ def zoom_numpy_array(img: np.ndarray, scaling_factors: Tuple[float, float, float
 	return zoom(img, scaling_factors, mode="nearest", cval=min_func(img), order=order)
 
 
-def zoom_sitk_image(img: sitk.Image, scaling_factors: Tuple[float, float, float], spacings: Tuple[float, float, float], min_func: Callable[[np.ndarray], int]) -> sitk.Image :
+def zoom_sitk_image(img: sitk.Image, scaling_factors: Tuple[float, float, float], spacings: Tuple[float, float, float], min_func: Callable[[np.ndarray], int], order:int) -> sitk.Image :
 	moving_origin = img.GetOrigin()
 	moving_direction = img.GetDirection()
 	
 	img = sitk.GetArrayFromImage(img)
 	# print("\tArrayed := %s - dtype := %s - being scaled by %s" % (str(moving.shape), str(moving.dtype), str(scaling_factors)))
 	
-	img = zoom_numpy_array(img, scaling_factors, min_func)
+	img = zoom_numpy_array(img, scaling_factors, min_func, order)
 	# print("\tImage zoomed, dtype := %s, size := %s" % (str(moving.dtype), str(moving.shape)))
 	
 	img = sitk.GetImageFromArray(img, isVector=False)
@@ -86,11 +86,11 @@ def zoom_sitk_image(img: sitk.Image, scaling_factors: Tuple[float, float, float]
 
 
 def zoom_sitk_image_image(moving: sitk.Image, scaling_factors: Tuple[float, float, float], spacings: Tuple[float, float, float]) -> sitk.Image :
-	return zoom_sitk_image(moving, scaling_factors, spacings, np.min)
+	return zoom_sitk_image(moving, scaling_factors, spacings, np.min, 3)
 
 
 def zoom_sitk_image_label(moving: sitk.Image, scaling_factors: Tuple[float, float, float], spacings: Tuple[float, float, float]) -> sitk.Image :
-	return zoom_sitk_image(moving, scaling_factors, spacings, lambda _: 0)
+	return zoom_sitk_image(moving, scaling_factors, spacings, lambda _: 0, 0) # must be 3 otherwise edges linearly interpolate, which we dont want as they will produce incorrect labellings
 
 
 def coregister_image_and_label(moving: sitk.Image, moving_label: sitk.Image, fixed: sitk.Image) -> Tuple[sitk.Image, sitk.Image, sitk.Transform, dict] :
