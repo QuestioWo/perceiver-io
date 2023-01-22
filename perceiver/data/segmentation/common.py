@@ -1,7 +1,6 @@
 from dataclasses import dataclass
-import math
 
-from typing import Tuple
+from typing import Callable, List, Tuple
 
 import torch
 import SimpleITK as sitk
@@ -9,16 +8,16 @@ import numpy as np
 
 from scipy.ndimage import zoom
 
-GRADIENT_DESCENT_ITERATIONS = 500
+GRADIENT_DESCENT_ITERATIONS = 100
 
 class SegmentationPreprocessor:
 	def __init__(self, transform):
 		self.image_transform, _ = transform
 
-	def preprocess(self, img):
+	def preprocess(self, img: torch.Tensor) -> torch.Tensor:
 		return self.image_transform(img)
 
-	def preprocess_batch(self, img_batch):
+	def preprocess_batch(self, img_batch : List[torch.Tensor]) -> torch.Tensor:
 		return torch.stack([self.preprocess(img) for img in img_batch])
 
 
@@ -63,29 +62,48 @@ class ImageInfo :
 	world_size_depth = 0
 
 
-def interpolate_scan_by_scaling_factors(moving: sitk.Image, moving_label: sitk.Image, scaling_factors, spacings: Tuple[float, float, float]) :
-	moving_origin = moving.GetOrigin()
-	moving_direction = moving.GetDirection()
+def zoom_numpy_array(img: np.ndarray, scaling_factors: Tuple[float, float, float], min_func: Callable[[np.ndarray], int], order: int) -> np.ndarray :
+	return zoom(img, scaling_factors, mode="nearest", cval=min_func(img), order=order)
+
+
+def zoom_sitk_image(img: sitk.Image, scaling_factors: Tuple[float, float, float], spacings: Tuple[float, float, float], min_func: Callable[[np.ndarray], int]) -> sitk.Image :
+	moving_origin = img.GetOrigin()
+	moving_direction = img.GetDirection()
 	
-	np_moving = sitk.GetArrayFromImage(moving)
-	np_moving_label = sitk.GetArrayFromImage(moving_label)
+	img = sitk.GetArrayFromImage(img)
+	# print("\tArrayed := %s - dtype := %s - being scaled by %s" % (str(moving.shape), str(moving.dtype), str(scaling_factors)))
 	
-	np_moving = zoom(np_moving, scaling_factors, mode='nearest', cval=np.min(np_moving))
-	np_moving_label = zoom(np_moving_label, scaling_factors, mode='nearest', cval=0)
+	img = zoom_numpy_array(img, scaling_factors, min_func)
+	# print("\tImage zoomed, dtype := %s, size := %s" % (str(moving.dtype), str(moving.shape)))
+	
+	img = sitk.GetImageFromArray(img, isVector=False)
+	# print("\tImage retrieved")
+	img.SetSpacing(spacings)
+	img.SetDirection(moving_direction)
+	img.SetOrigin(moving_origin)
 
-	moving = sitk.GetImageFromArray(np_moving)
-	moving.SetSpacing(spacings)
-	moving.SetDirection(moving_direction)
-	moving.SetOrigin(moving_origin)
-
-	moving_label = sitk.GetImageFromArray(np_moving_label)
-	moving_label.SetSpacing(spacings)
-	moving_label.SetDirection(moving_direction)
-	moving_label.SetOrigin(moving_origin)
-	return moving, moving_label
+	return img
 
 
-def coregister_scan(moving: sitk.Image, moving_label: sitk.Image, fixed: sitk.Image) -> Tuple[sitk.Image, sitk.Image, sitk.Transform, int] :
+def zoom_sitk_image_image(moving: sitk.Image, scaling_factors: Tuple[float, float, float], spacings: Tuple[float, float, float]) -> sitk.Image :
+	return zoom_sitk_image(moving, scaling_factors, spacings, np.min)
+
+
+def zoom_sitk_image_label(moving: sitk.Image, scaling_factors: Tuple[float, float, float], spacings: Tuple[float, float, float]) -> sitk.Image :
+	return zoom_sitk_image(moving, scaling_factors, spacings, lambda _: 0)
+
+
+def coregister_image_and_label(moving: sitk.Image, moving_label: sitk.Image, fixed: sitk.Image) -> Tuple[sitk.Image, sitk.Image, sitk.Transform, dict] :
+	(moving, tx, scaling_factors, spacings) = coregister_image(moving, fixed)
+
+	moving_label = zoom_sitk_image_label(moving_label, scaling_factors, spacings)
+	
+	moving_label = apply_transformation_to_image_label(moving_label, fixed, tx)
+
+	return (moving, moving_label, tx, {"depth": scaling_factors[0], "width_height": scaling_factors[1]})
+
+
+def coregister_image(moving: sitk.Image, fixed: sitk.Image) -> Tuple[sitk.Image, sitk.Transform, Tuple[float, float, float], Tuple[float, float, float]] :
 	# Interpolate/Resample to the same spacing and size aka worldsize
 	## NOTE: assuming width and height have same spacing for simplicity
 	fixed_spacing_width_height = min(fixed.GetSpacing()[0], fixed.GetSpacing()[1])
@@ -94,11 +112,37 @@ def coregister_scan(moving: sitk.Image, moving_label: sitk.Image, fixed: sitk.Im
 
 	# Rescale using scale factors
 	scaling_factors = (spacing_scale_factor_depth, spacing_scale_factor_width_height, spacing_scale_factor_width_height)
-	moving, moving_label = interpolate_scan_by_scaling_factors(moving, moving_label, scaling_factors, (fixed_spacing_width_height, fixed_spacing_width_height, fixed.GetSpacing()[2]))
+	spacings = (fixed_spacing_width_height, fixed_spacing_width_height, fixed.GetSpacing()[2])
+	
+	moving = zoom_sitk_image_image(moving, scaling_factors, spacings)
+	
+	tx = computeCoregistrationTransformation(moving, fixed)
 
-	# print("post interpolation size", moving.GetSize())
+	moving = apply_transformation_to_image_image(moving, fixed, tx)
 
-	# Coregister moving to fixed
+	return (moving, tx, scaling_factors, spacings)
+
+
+def apply_transformation_to_image(moving: sitk.Image, fixed: sitk.Image, tx: sitk.Transform, default_pixel_value: Callable[[sitk.Image], float], interpolator = sitk.sitkLinear) :
+	resampler = sitk.ResampleImageFilter()
+	resampler.SetReferenceImage(fixed)
+	resampler.SetTransform(tx)
+	resampler.SetInterpolator(interpolator)
+	resampler.SetDefaultPixelValue(default_pixel_value(moving))
+	moving = resampler.Execute(moving)
+
+	return moving
+
+
+def apply_transformation_to_image_image(moving: sitk.Image, fixed: sitk.Image, tx: sitk.Transform) :
+	return apply_transformation_to_image(moving, fixed, tx, lambda i: np.min(sitk.GetArrayFromImage(i)), sitk.sitkLinear)
+
+
+def apply_transformation_to_image_label(moving: sitk.Image, fixed: sitk.Image, tx: sitk.Transform) :
+	return apply_transformation_to_image(moving, fixed, tx, lambda _: 0, sitk.sitkNearestNeighbor)
+
+
+def computeCoregistrationTransformation(moving: sitk.Image, fixed: sitk.Image) :
 	initialTx = sitk.CenteredTransformInitializer(
 		fixed, moving, sitk.AffineTransform(fixed.GetDimension())
 	)
@@ -130,19 +174,7 @@ def coregister_scan(moving: sitk.Image, moving_label: sitk.Image, fixed: sitk.Im
 
 	tx = R.Execute(fixed, moving)
 
-	resampler = sitk.ResampleImageFilter()
-	resampler.SetReferenceImage(fixed)
-	resampler.SetTransform(tx)
-
-	resampler.SetInterpolator(sitk.sitkLinear)
-	resampler.SetDefaultPixelValue(np.min(sitk.GetArrayFromImage(moving)))
-	out_moving = resampler.Execute(moving)
-
-	resampler.SetInterpolator(sitk.sitkNearestNeighbor)
-	resampler.SetDefaultPixelValue(0)
-	out_moving_label = resampler.Execute(moving_label)
-
-	return (out_moving, out_moving_label, tx, {"width_height": spacing_scale_factor_width_height, "depth": spacing_scale_factor_depth})
+	return tx
 
 
 def channels_to_last(img: torch.Tensor):
