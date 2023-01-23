@@ -36,7 +36,7 @@ class SegmentationMapperCLI(CLI):
 			#     "model.decoder.dropout": 0.3,
 			# }
 
-			# 128x128x1 config, version_0:
+			# 128x128x1 config, version_0/version_9 (baseline):
 			# {
 			# 	"model.num_latents": 256, # ((IMAGE_SIZE_XY//8) * (IMAGE_SIZE_XY//8) * 1)
 			# 	"model.num_latent_channels": 64, # ((IMAGE_SIZE_XY) // 2)
@@ -229,30 +229,30 @@ class SegmentationMapperCLI(CLI):
 			# }
 
 			# 128x128x1 config - version_8 - more channels?
-			{
-				"model.num_latents": 256, # ((IMAGE_SIZE_XY//8) * (IMAGE_SIZE_XY//8) * 1)
-				"model.num_latent_channels": 128, # ((IMAGE_SIZE_XY) // 2)
+			# {
+			# 	"model.num_latents": 256, # ((IMAGE_SIZE_XY//8) * (IMAGE_SIZE_XY//8) * 1)
+			# 	"model.num_latent_channels": 128, # ((IMAGE_SIZE_XY) // 2)
 				
-				"model.encoder.num_frequency_bands": 16, # (NUM_CLASSES)
-				"model.encoder.num_cross_attention_layers": 12,
-				"model.encoder.num_cross_attention_heads": 12,
-				"model.encoder.num_cross_attention_qk_channels": 24,
-				"model.encoder.num_cross_attention_v_channels": 24,
-				"model.encoder.num_self_attention_blocks": 12,
-				"model.encoder.num_self_attention_layers_per_block": 12,
-				"model.encoder.num_self_attention_heads": 12,
-				"model.encoder.num_self_attention_qk_channels": 24,
-				"model.encoder.num_self_attention_v_channels": 24,
-				"model.encoder.dropout": 0.5,
+			# 	"model.encoder.num_frequency_bands": 16, # (NUM_CLASSES)
+			# 	"model.encoder.num_cross_attention_layers": 12,
+			# 	"model.encoder.num_cross_attention_heads": 12,
+			# 	"model.encoder.num_cross_attention_qk_channels": 24,
+			# 	"model.encoder.num_cross_attention_v_channels": 24,
+			# 	"model.encoder.num_self_attention_blocks": 12,
+			# 	"model.encoder.num_self_attention_layers_per_block": 12,
+			# 	"model.encoder.num_self_attention_heads": 12,
+			# 	"model.encoder.num_self_attention_qk_channels": 24,
+			# 	"model.encoder.num_self_attention_v_channels": 24,
+			# 	"model.encoder.dropout": 0.5,
 
-				"model.decoder.num_cross_attention_heads": 12,
-				"model.decoder.num_cross_attention_qk_channels": 24,
-				"model.decoder.num_cross_attention_v_channels": 24,
-				"model.decoder.cross_attention_residual": True,
-				"model.decoder.dropout": 0.5,
-			}
+			# 	"model.decoder.num_cross_attention_heads": 12,
+			# 	"model.decoder.num_cross_attention_qk_channels": 24,
+			# 	"model.decoder.num_cross_attention_v_channels": 24,
+			# 	"model.decoder.cross_attention_residual": True,
+			# 	"model.decoder.dropout": 0.5,
+			# }
 
-			# 128x128x1 config
+			# 128x128x1 config, version_10 - more decoder cross attention:
 			# {
 			# 	"model.num_latents": 256, # ((IMAGE_SIZE_XY//8) * (IMAGE_SIZE_XY//8) * 1)
 			# 	"model.num_latent_channels": 64, # ((IMAGE_SIZE_XY) // 2)
@@ -261,7 +261,7 @@ class SegmentationMapperCLI(CLI):
 			# 	"model.encoder.num_cross_attention_layers": 8, # IMAGE_SIZE_XY//16
 			# 	"model.encoder.num_cross_attention_heads": 8, # IMAGE_SIZE_XY//16
 			# 	"model.encoder.num_cross_attention_qk_channels": 16, # IMAGE_SIZE_XY//8
-			# 	"model.encoder.num_cross_attention_v_channels":16, # IMAGE_SIZE_XY//8
+			# 	"model.encoder.num_cross_attention_v_channels": 16, # IMAGE_SIZE_XY//8
 			# 	"model.encoder.num_self_attention_blocks": 8, # IMAGE_SIZE_XY//16
 			# 	"model.encoder.num_self_attention_layers_per_block": 8, # IMAGE_SIZE_XY//16
 			# 	"model.encoder.num_self_attention_heads": 8, # IMAGE_SIZE_XY//16
@@ -269,12 +269,60 @@ class SegmentationMapperCLI(CLI):
 			# 	"model.encoder.num_self_attention_v_channels":16, # IMAGE_SIZE_XY//8
 			# 	"model.encoder.dropout": 0.7,
 
-			# 	"model.decoder.num_cross_attention_heads": 8, # IMAGE_SIZE_XY//16
-			# 	"model.decoder.num_cross_attention_qk_channels": 16, # IMAGE_SIZE_XY//8
-			# 	"model.decoder.num_cross_attention_v_channels": 16, # IMAGE_SIZE_XY//8
+			# 	"model.decoder.num_cross_attention_heads": 12, # IMAGE_SIZE_XY//16
+			# 	"model.decoder.num_cross_attention_qk_channels": 24, # IMAGE_SIZE_XY//8
+			# 	"model.decoder.num_cross_attention_v_channels": 24, # IMAGE_SIZE_XY//8
 			# 	"model.decoder.cross_attention_residual": True,
 			# 	"model.decoder.dropout": 0.7,
 			# }
+
+			# 128x128x1 config, version_11/13 - optimal(?):
+			# {
+			# 	"model.num_latents": 256, # ((IMAGE_SIZE_XY//8) * (IMAGE_SIZE_XY//8) * 1)
+			# 	"model.num_latent_channels": 128, # ((IMAGE_SIZE_XY) // 2)
+				
+			# 	"model.encoder.num_frequency_bands": 8, # (NUM_CLASSES)
+			# 	"model.encoder.num_cross_attention_layers": 4, # IMAGE_SIZE_XY//16
+			# 	"model.encoder.num_cross_attention_heads": 4, # IMAGE_SIZE_XY//16
+			# 	"model.encoder.num_cross_attention_qk_channels": 8, # IMAGE_SIZE_XY//8
+			# 	"model.encoder.num_cross_attention_v_channels": 8, # IMAGE_SIZE_XY//8
+			# 	"model.encoder.num_self_attention_blocks": 4, # IMAGE_SIZE_XY//16
+			# 	"model.encoder.num_self_attention_layers_per_block": 4, # IMAGE_SIZE_XY//16
+			# 	"model.encoder.num_self_attention_heads": 4, # IMAGE_SIZE_XY//16
+			# 	"model.encoder.num_self_attention_qk_channels": 8, # IMAGE_SIZE_XY//8
+			# 	"model.encoder.num_self_attention_v_channels": 8, # IMAGE_SIZE_XY//8
+			# 	"model.encoder.dropout": 0.5,
+
+			# 	"model.decoder.num_cross_attention_heads": 4, # IMAGE_SIZE_XY//16
+			# 	"model.decoder.num_cross_attention_qk_channels": 8, # IMAGE_SIZE_XY//8
+			# 	"model.decoder.num_cross_attention_v_channels": 8, # IMAGE_SIZE_XY//8
+			# 	"model.decoder.cross_attention_residual": True,
+			# 	"model.decoder.dropout": 0.5,
+			# }
+
+			# 128x128x5 config, version_12/14 - similar to 128x128x1 but more latents:
+			{
+				"model.num_latents": 512, # ((IMAGE_SIZE_XY//8) * (IMAGE_SIZE_XY//8) * 1)
+				"model.num_latent_channels": 128, # ((IMAGE_SIZE_XY) // 2)
+				
+				"model.encoder.num_frequency_bands": 8, # (NUM_CLASSES)
+				"model.encoder.num_cross_attention_layers": 4, # IMAGE_SIZE_XY//16
+				"model.encoder.num_cross_attention_heads": 4, # IMAGE_SIZE_XY//16
+				"model.encoder.num_cross_attention_qk_channels": 8, # IMAGE_SIZE_XY//8
+				"model.encoder.num_cross_attention_v_channels": 8, # IMAGE_SIZE_XY//8
+				"model.encoder.num_self_attention_blocks": 4, # IMAGE_SIZE_XY//16
+				"model.encoder.num_self_attention_layers_per_block": 4, # IMAGE_SIZE_XY//16
+				"model.encoder.num_self_attention_heads": 4, # IMAGE_SIZE_XY//16
+				"model.encoder.num_self_attention_qk_channels": 8, # IMAGE_SIZE_XY//8
+				"model.encoder.num_self_attention_v_channels": 8, # IMAGE_SIZE_XY//8
+				"model.encoder.dropout": 0.5,
+
+				"model.decoder.num_cross_attention_heads": 4, # IMAGE_SIZE_XY//16
+				"model.decoder.num_cross_attention_qk_channels": 8, # IMAGE_SIZE_XY//8
+				"model.decoder.num_cross_attention_v_channels": 8, # IMAGE_SIZE_XY//8
+				"model.decoder.cross_attention_residual": True,
+				"model.decoder.dropout": 0.5,
+			}
 		)
 
 

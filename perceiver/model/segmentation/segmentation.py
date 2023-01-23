@@ -23,21 +23,28 @@ from perceiver.model.image.common import FourierPositionEncoding
 from perceiver.data.segmentation.miccai import IMAGE_SIZE, NUM_CLASSES
 from perceiver.model.core.modules import OutputAdapter
 
-SLICE_INDEX_FROM, SLICE_INDEX_TO = (64, 124) # For 220,256,256 NOTE: cannot run
-SLICE_INDEX_FROM, SLICE_INDEX_TO = (48, 52) # For 165,192,192 NOTE: cannot run
-SLICE_INDEX_FROM, SLICE_INDEX_TO = (37, 38) # For 110,128,128 NOTE: can run
-# SLICE_INDEX_FROM, SLICE_INDEX_TO = (18, 19) # For 55,64,64 NOTE: can run
+# SLICE_INDEX_FROM, SLICE_INDEX_TO = (64, 124) # For 220,256,256 NOTE: cannot run
+# SLICE_INDEX_FROM, SLICE_INDEX_TO = (48, 52) # For 165,192,192 NOTE: cannot run
+# SLICE_INDEX_FROM, SLICE_INDEX_TO = (37, 38) # For 110,128,128 NOTE: can run
+SLICE_INDEX_FROM, SLICE_INDEX_TO = (37, 42) # For 110,128,128 NOTE: can run
+
+SLABS_START = 30
+# SLABS_START = 0
+SLABS_DEPTH = 10
+# SLABS_DEPTH = IMAGE_SIZE[0]
+SLABS_SIZE = SLICE_INDEX_TO - SLICE_INDEX_FROM
+
 
 @dataclass
 class SegmentationDecoderConfig(DecoderConfig):
-	num_output_queries: int = (IMAGE_SIZE[1] * IMAGE_SIZE[2] * (SLICE_INDEX_TO - SLICE_INDEX_FROM))
+	num_output_queries: int = (IMAGE_SIZE[1] * IMAGE_SIZE[2] * SLABS_SIZE)
 	num_output_query_channels: int = None
 	num_classes: int = NUM_CLASSES
 
 
 @dataclass
 class SegmentationEncoderConfig(EncoderConfig):
-	image_shape: Tuple[int, int, int] = (IMAGE_SIZE[1], IMAGE_SIZE[2], SLICE_INDEX_TO - SLICE_INDEX_FROM)
+	image_shape: Tuple[int, int, int] = (IMAGE_SIZE[1], IMAGE_SIZE[2], SLABS_SIZE)
 	num_frequency_bands: int = 64
 
 class DiceLoss(nn.Module):
@@ -90,13 +97,7 @@ class LitMapper(LitModel):
 	def step(self, batch):
 		logits, y = self(batch)
 
-		# TODO: remove when making 3d
-		y: torch.Tensor = y[:,:,:,SLICE_INDEX_FROM:SLICE_INDEX_TO]
-		# y = y[:,:,:,None]
-
-		b, *_ = y.shape
-		logits = torch.reshape(logits, [b, *y.shape[1:], NUM_CLASSES])
-		logits = torch.einsum("b w h d c -> b c w h d", logits)
+		y = y[:,:,:,SLABS_START:SLABS_START+SLABS_DEPTH]
 		
 		ce_loss = self.ce_loss(logits, y.long())
 		dice_loss = self.dice_loss(logits, y.long(), softmax=True)
@@ -105,6 +106,7 @@ class LitMapper(LitModel):
 		y_pred = logits.argmax(dim=1).int()
 		dice_acc = self.dice(y_pred, y)
 		raw_acc = self.acc(y_pred, y)
+
 		return loss, raw_acc, dice_acc
 
 	def training_step(self, batch, batch_idx):
@@ -137,10 +139,6 @@ class SegmentationInputAdapter(InputAdapter):
 		self.position_encoding = position_encoding
 
 	def forward(self, x):
-		# TODO: remove when making 3d
-		x = x[:,:,:,SLICE_INDEX_FROM:SLICE_INDEX_TO]
-		# x = x[:,:,:,None]
-		
 		b, *d = x.shape
 
 		if tuple(d) != self.image_shape:
@@ -232,5 +230,22 @@ class LitSegmentationMapper(LitMapper):
 		)
 
 	def forward(self, batch):
-		y, x = batch["label"], batch["image"]
-		return self.model(x), y
+		x = batch["image"]
+
+		b, *_ = x.shape
+		
+		full_results = torch.zeros((b, NUM_CLASSES, IMAGE_SIZE[1], IMAGE_SIZE[2], SLABS_DEPTH), device=x.device)
+
+		for i in range(SLABS_DEPTH // SLABS_SIZE) :
+			offset = i * SLABS_SIZE
+
+			current_slab = x[:,:,:,SLABS_START+offset:SLABS_START+(offset + SLABS_SIZE)]
+
+			logits = self.model(current_slab)
+
+			logits = torch.reshape(logits, [b, *x.shape[1:-1], SLABS_SIZE, NUM_CLASSES])
+			logits = torch.einsum("b w h d c -> b c w h d", logits)
+
+			full_results[:,:,:,:,offset:(offset + SLABS_SIZE)] = logits
+
+		return full_results, batch["label"]

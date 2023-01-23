@@ -130,7 +130,6 @@ def apply_transformation_to_image(moving: sitk.Image, fixed: sitk.Image, tx: sit
 	resampler.SetInterpolator(interpolator)
 	resampler.SetDefaultPixelValue(default_pixel_value(moving))
 	moving = resampler.Execute(moving)
-
 	return moving
 
 
