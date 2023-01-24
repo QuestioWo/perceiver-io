@@ -26,22 +26,29 @@ NUM_CLASSES = 16
 
 COREGISTRATION_IMAGE_FILENAME = "coregistration_image" # + ".nii.gz"
 
+SKIP_PREPROCESSED_CHECK = True
+
 class MICCAIPreprocessor(SegmentationPreprocessor):
 	def __init__(self, channels_last: bool = True, normalize: bool = True):
 		super().__init__(miccai_transform(channels_last, normalize))
 
 
 class MICCAIDataset(Dataset) :
-	def __init__(self, data, images_preprocessed_dir, transforms=None) :
+	def __init__(self, data, images_preprocessed_dir, metadata_task1, metadata_task2, transforms=None) :
 		self.data = [func() for func in tqdm(data)]
 		self.transforms = transforms
 		self.images_preprocessed_dir = images_preprocessed_dir
+		self.metadata_task1 = metadata_task1
+		self.metadata_task2 = metadata_task2
 
 	def set_transform(self, transforms) :
 		self.transforms = transforms
 
 	def get_coregistration_image(self) :
 		return sitk.ReadImage(os.path.join(self.images_preprocessed_dir, COREGISTRATION_IMAGE_FILENAME + ".nii.gz"), sitk.sitkFloat64)
+
+	def get_labels(self) :
+		return self.metadata_task1["labels"]
 
 	def __getitem__(self, index):
 		sample = self.data[index]
@@ -88,6 +95,14 @@ class MICCAILoader() :
 		if not os.path.exists(self.labels_dir) :
 			print("Cannot find labelsTr inside dataset")
 			sys.exit(1)
+		
+		self.metadata_task1 = {}
+		with open(os.path.join(self.root, "task1_dataset.json"), "r") as f :
+			self.metadata_task1 = json.load(f)
+		
+		self.metadata_task2 = {}
+		with open(os.path.join(self.root, "task2_dataset.json"), "r") as f :
+			self.metadata_task2 = json.load(f)
 
 		self._no_files = min(len(os.listdir(self.labels_dir)), self.LIMIT_SCAN_COUNT)
 
@@ -109,7 +124,7 @@ class MICCAILoader() :
 					coregister_image_and_labels = True
 					break
 
-		if coregister_image_and_labels :
+		if coregister_image_and_labels and not SKIP_PREPROCESSED_CHECK :
 			image_info = self._find_coregistration_scan()
 
 			print("Preparing largest scan - %s - for coregistration..." % self.SCAN_TO_COREGISTER_TO[0])
@@ -338,7 +353,7 @@ class MICCAILoader() :
 			start_location = _training_split + _test_split
 			split_size = start_location + _val_split
 
-		return MICCAIDataset(self.data[start_location:split_size], self.images_preprocessed_dir)
+		return MICCAIDataset(self.data[start_location:split_size], self.images_preprocessed_dir, self.metadata_task1, self.metadata_task2)
 
 
 class MICCAIDataModule(pl.LightningDataModule):

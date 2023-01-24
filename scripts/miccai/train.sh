@@ -1,6 +1,6 @@
 python -m perceiver.scripts.segmentation.mapper fit \
   --optimizer=AdamW \
-  --optimizer.lr=1e-4 \
+  --optimizer.lr=5e-4 \
   --trainer.max_epochs=5000 \
   --trainer.logger=TensorBoardLogger \
   --trainer.logger.save_dir=logs \

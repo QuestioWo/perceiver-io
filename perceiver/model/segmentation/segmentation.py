@@ -6,6 +6,8 @@ from typing import Any, Optional, Tuple
 import torch.nn as nn
 import torchmetrics as tm
 import torch
+import pytorch_lightning.utilities.memory as mem_utils
+import torch.utils.checkpoint
 
 from einops import rearrange
 
@@ -28,11 +30,15 @@ from perceiver.model.core.modules import OutputAdapter
 # SLICE_INDEX_FROM, SLICE_INDEX_TO = (37, 38) # For 110,128,128 NOTE: can run
 SLICE_INDEX_FROM, SLICE_INDEX_TO = (37, 42) # For 110,128,128 NOTE: can run
 
-SLABS_START = 30
-# SLABS_START = 0
-SLABS_DEPTH = 10
-# SLABS_DEPTH = IMAGE_SIZE[0]
-SLABS_SIZE = SLICE_INDEX_TO - SLICE_INDEX_FROM
+SLABS_SIZE = 11
+
+# SLABS_START = 30
+# SLABS_DEPTH = 10
+
+SLABS_START = 0
+SLABS_DEPTH = IMAGE_SIZE[0]
+
+SLABS_ITERATIONS = SLABS_DEPTH // SLABS_SIZE
 
 
 @dataclass
@@ -232,16 +238,21 @@ class LitSegmentationMapper(LitMapper):
 	def forward(self, batch):
 		x = batch["image"]
 
+		x.requires_grad = self.model.training
+
 		b, *_ = x.shape
 		
 		full_results = torch.zeros((b, NUM_CLASSES, IMAGE_SIZE[1], IMAGE_SIZE[2], SLABS_DEPTH), device=x.device)
 
-		for i in range(SLABS_DEPTH // SLABS_SIZE) :
+		for i in range(SLABS_ITERATIONS) :
 			offset = i * SLABS_SIZE
 
 			current_slab = x[:,:,:,SLABS_START+offset:SLABS_START+(offset + SLABS_SIZE)]
 
-			logits = self.model(current_slab)
+			if current_slab.requires_grad :
+				logits = torch.utils.checkpoint.checkpoint(self.model, current_slab)
+			else :
+				logits = self.model(current_slab)
 
 			logits = torch.reshape(logits, [b, *x.shape[1:-1], SLABS_SIZE, NUM_CLASSES])
 			logits = torch.einsum("b w h d c -> b c w h d", logits)
