@@ -26,7 +26,7 @@ NUM_CLASSES = 16
 
 COREGISTRATION_IMAGE_FILENAME = "coregistration_image" # + ".nii.gz"
 
-SKIP_PREPROCESSED_CHECK = True
+SKIP_PREPROCESSED_CHECK = False
 
 MICCAI_TASK = 1 # of 2
 
