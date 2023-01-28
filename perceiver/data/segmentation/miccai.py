@@ -28,6 +28,8 @@ COREGISTRATION_IMAGE_FILENAME = "coregistration_image" # + ".nii.gz"
 
 SKIP_PREPROCESSED_CHECK = True
 
+MICCAI_TASK = 1 # of 2
+
 class MICCAIPreprocessor(SegmentationPreprocessor):
 	def __init__(self, channels_last: bool = True, normalize: bool = True):
 		super().__init__(miccai_transform(channels_last, normalize))
@@ -68,8 +70,8 @@ class MICCAILoader() :
 	
 	# NOTE: it appears that the train and test sets are combined for training epochs
 	TRAIN_SIZE = 60
-	TEST_SIZE = 20
-	# VAL_SIZE = 20 # the rest
+	TEST_SIZE = 30
+	# VAL_SIZE = 10 # the rest
 	
 	BASIC_DATASET_ITEM = {'label' : None, 'image' : None, 'filename' : None}
 
@@ -104,7 +106,12 @@ class MICCAILoader() :
 		with open(os.path.join(self.root, "task2_dataset.json"), "r") as f :
 			self.metadata_task2 = json.load(f)
 
-		self._no_files = min(len(os.listdir(self.labels_dir)), self.LIMIT_SCAN_COUNT)
+		self._task_dataset = None
+		if MICCAI_TASK == 1 :
+			self._task_dataset = self.metadata_task1['training']
+		else :
+			self._task_dataset = self.metadata_task2['training']
+		self._no_files = len(self._task_dataset)
 
 		self.data = []
 		self._load_data(load_raw_instead)
@@ -168,8 +175,8 @@ class MICCAILoader() :
 		self.data = []
 
 		# Load all images
-		for i in tqdm(range(self._no_files)) :
-			filename = list(filter(lambda x: x.endswith(".nii.gz") and x.startswith("amos"), os.listdir(self.images_preprocessed_dir)))[i] # check the loading
+		for file_object in tqdm(self._task_dataset) :
+			filename = os.path.basename(file_object['image']) # check the loading
 
 			def _get_image_from_filename(fname: str) :
 				image_object = copy.copy(self.BASIC_DATASET_ITEM)
@@ -303,8 +310,8 @@ class MICCAILoader() :
 		image_info = ImageInfo()
 		largest_size = 0
 
-		for i in tqdm(range(self._no_files)) :
-			filename = os.listdir(self.images_dir)[i]
+		for file_obj in tqdm(self._task_dataset) :
+			filename = os.path.basename(file_obj['image'])
 
 			itk_img = sitk.ReadImage(os.path.join(self.images_dir, filename), sitk.sitkFloat32)
 			itk_img_seg = sitk.ReadImage(os.path.join(self.labels_dir, filename), sitk.sitkUInt8)

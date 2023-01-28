@@ -22,7 +22,7 @@ from perceiver.data.segmentation.miccai import IMAGE_SIZE, NUM_CLASSES, MICCAIDa
 DEFAULT_SLICE = 42
 DISPLAY_DIFFS = False
 BATCH_SIZE = 1
-USE_CUDA = True
+USE_CUDA = False
 COLS, ROWS = 3, 3
 USE_LAST_CHECKPOINT = False
 SAVE_PREDICTIONS = True
@@ -189,7 +189,7 @@ def transform_and_upscale_predictions(preds) :
 
 		p = sitk.Resample(p, segmentation_objects[i]['image'], coregistered_transformations[i].GetInverse(), sitk.sitkNearestNeighbor, 0)
 
-		p = p.SetDirection(coregistered_images[i][0].GetDirection())
+		p.SetDirection(coregistered_images[i][0].GetDirection())
 
 		p = sitk.Cast(p, sitk.sitkUInt8)
 		

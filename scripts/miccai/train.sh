@@ -6,7 +6,7 @@ python -m perceiver.scripts.segmentation.mapper fit \
   --trainer.logger.save_dir=logs \
   --trainer.logger.name=miccai_seg \
   --data=MICCAIDataModule \
-  --data.batch_size=1 \
+  --data.batch_size=2 \
   --trainer.log_every_n_steps=2 \
   --data.num_workers=8 \
   --trainer.check_val_every_n_epoch=1 \
