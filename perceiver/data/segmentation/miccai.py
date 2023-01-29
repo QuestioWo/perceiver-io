@@ -124,8 +124,8 @@ class MICCAILoader() :
 			os.mkdir(self.labels_preprocessed_dir)
 			coregister_image_and_labels = True
 		else :
-			for i in range(self._no_files) :
-				filename = os.listdir(self.images_dir)[i]
+			for file_obj in self._task_dataset :
+				filename = os.path.basename(file_obj['image'])
 
 				if not filename in os.listdir(self.images_preprocessed_dir) :
 					coregister_image_and_labels = True
@@ -349,7 +349,7 @@ class MICCAILoader() :
 		_val_split = self._no_files - (_training_split + _test_split)
 
 		start_location = 0
-		split_size = self._no_files
+		split_size = 1
 		if split == "train" :
 			start_location = 0
 			split_size = _training_split
@@ -406,9 +406,6 @@ class MICCAIDataModule(pl.LightningDataModule):
 			self.dataset_loader = MICCAILoader(self.hparams.dataset_dir, self.load_raw_instead)
 		
 		return self.dataset_loader.get_split(split)
-
-	def prepare_data(self) -> None:
-		self.load_dataset()
 
 	def setup(self, stage: Optional[str] = None) -> None:
 		self.ds_train = self.load_dataset(split="train")

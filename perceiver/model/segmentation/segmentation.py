@@ -30,16 +30,21 @@ from perceiver.model.core.modules import OutputAdapter
 # SLICE_INDEX_FROM, SLICE_INDEX_TO = (37, 38) # For 110,128,128 NOTE: can run
 SLICE_INDEX_FROM, SLICE_INDEX_TO = (37, 42) # For 110,128,128 NOTE: can run
 
-SLABS_SIZE = 5
+SLABS_SIZE = 10
 
 # SLABS_START = 30
 # SLABS_DEPTH = 10
 
 SLABS_START = 0
 SLABS_DEPTH = IMAGE_SIZE[0]
+SLABS_OVERLAP = 5
 
-SLABS_ITERATIONS = SLABS_DEPTH // SLABS_SIZE
+assert int(SLABS_DEPTH / SLABS_OVERLAP) == (SLABS_DEPTH / SLABS_OVERLAP), "depth of scan must be divisible by slab overlap"
+assert int(SLABS_DEPTH / SLABS_SIZE) == (SLABS_DEPTH / SLABS_SIZE), "depth of scan must be divisible by slab size"
 
+# -1 as first slab is double the height due to having nothing to overlap with
+# the second part of the last slab will have no overlap on the bottom half
+SLABS_ITERATIONS = (SLABS_DEPTH // (SLABS_SIZE - SLABS_OVERLAP)) - (1 if SLABS_SIZE // SLABS_OVERLAP == 2 else 0)
 
 @dataclass
 class SegmentationDecoderConfig(DecoderConfig):
@@ -247,7 +252,15 @@ class LitSegmentationMapper(LitMapper):
 		for i in range(SLABS_ITERATIONS) :
 			offset = i * SLABS_SIZE
 
-			current_slab = x[:,:,:,SLABS_START+offset:SLABS_START+(offset + SLABS_SIZE)]
+			slab_overlap_const = SLABS_OVERLAP*i
+
+			start_location = (SLABS_START+offset-slab_overlap_const)
+			end_location = SLABS_START+(SLABS_SIZE+offset-slab_overlap_const)
+
+			# print("start :=", start_location)
+			# print("end :=", end_location)
+
+			current_slab = x[:,:,:,start_location:end_location]
 
 			if current_slab.requires_grad :
 				logits = torch.utils.checkpoint.checkpoint(self.model, current_slab)
@@ -257,6 +270,9 @@ class LitSegmentationMapper(LitMapper):
 			logits = torch.reshape(logits, [b, *x.shape[1:-1], SLABS_SIZE, NUM_CLASSES])
 			logits = torch.einsum("b w h d c -> b c w h d", logits)
 
-			full_results[:,:,:,:,offset:(offset + SLABS_SIZE)] = logits
+			# always just add logits as otherwise previous logits will be overwritten.
+			# addition means that no averaging has to take place and the maxes/predictions
+			# will be correct and efficient
+			full_results[:,:,:,:,start_location:end_location] += logits
 
 		return full_results, batch["label"]
