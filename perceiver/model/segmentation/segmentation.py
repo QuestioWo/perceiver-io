@@ -30,7 +30,7 @@ from perceiver.model.core.modules import OutputAdapter
 # SLICE_INDEX_FROM, SLICE_INDEX_TO = (37, 38) # For 110,128,128 NOTE: can run
 SLICE_INDEX_FROM, SLICE_INDEX_TO = (37, 42) # For 110,128,128 NOTE: can run
 
-SLABS_SIZE = 10
+SLABS_SIZE = 11
 
 # SLABS_START = 30
 # SLABS_DEPTH = 10
