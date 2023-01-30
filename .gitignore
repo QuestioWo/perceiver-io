@@ -3,7 +3,8 @@ dist/
 .cache/
 __pycache__/
 logs/
-AMOS22/
+amos22/
 labelsTs/
 results/
 *.nii.gz
+*.zip

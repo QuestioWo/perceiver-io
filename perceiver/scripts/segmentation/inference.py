@@ -17,9 +17,9 @@ from medpy import metric
 
 from perceiver.model.segmentation.segmentation import SLABS_DEPTH, SLABS_START, DiceLoss, LitSegmentationMapper, SLICE_INDEX_FROM, SLICE_INDEX_TO
 from perceiver.data.segmentation.common import coregister_image, zoom_sitk_image_label
-from perceiver.data.segmentation.miccai import IMAGE_SIZE, NUM_CLASSES, MICCAIDataModule, MICCAIPreprocessor
+from perceiver.data.segmentation.miccai import CT_ONLY, IMAGE_SIZE, NUM_CLASSES, MICCAIDataModule, MICCAIPreprocessor, get_ct_only_dataset_files
 
-DATASET_ROOT = "AMOS22"
+DATASET_ROOT = "amos22"
 
 BATCH_SIZE = 1
 USE_CUDA = True
@@ -28,13 +28,13 @@ COLS, ROWS = 3, 3
 LOAD_SPECIFIC_VERSION = 'correct_10_overlap_5'
 USE_LAST_CHECKPOINT = False
 
-GENERATE_MICCAI_TASK_1_RESULTS = True
-SAVE_PREDICTIONS = GENERATE_MICCAI_TASK_1_RESULTS and True
+GENERATE_MICCAI_TEST_RESULTS = True
+SAVE_PREDICTIONS = GENERATE_MICCAI_TEST_RESULTS and True
 SAVE_PREDICTIONS_DIR = "results"
-COMPUTE_METRICS = not GENERATE_MICCAI_TASK_1_RESULTS and True
+COMPUTE_METRICS = not GENERATE_MICCAI_TEST_RESULTS and True
 COMPUTE_INFERENCE_TIMES = True
 
-DISPLAY_DIFFS = GENERATE_MICCAI_TASK_1_RESULTS and False
+DISPLAY_DIFFS = GENERATE_MICCAI_TEST_RESULTS and False
 DEFAULT_SLICE = 42
 DISPLAY_UPSCALED_INFERENCE_RESULTS = True
 
@@ -116,7 +116,7 @@ def calculate_metrics(pred: np.ndarray, gt: np.ndarray) -> Tuple[float, float]:
         hd95 = metric.binary.hd95(pred, gt)
         return dice, hd95
     elif pred.sum() > 0 and gt.sum()==0:
-        return 1, 0
+        return 0, 0 # was originally 1, 0
     else:
         return 0, 0
 
@@ -150,8 +150,13 @@ def load_and_preprocess_data() :
 	miccai_preproc = MICCAIPreprocessor()
 
 	segmentation_objects = []
-	if GENERATE_MICCAI_TASK_1_RESULTS :
-		file_list = segmentation_dataset.metadata_task1['test']
+	if GENERATE_MICCAI_TEST_RESULTS :
+		file_list = segmentation_dataset.metadata['test']
+		if CT_ONLY :
+			file_list = [f['image'] for f in get_ct_only_dataset_files(file_list)]
+
+		file_list = file_list[:len(file_list) // 2]
+
 		segmentation_objects = [{'image': sitk.ReadImage(os.path.join(DATASET_ROOT, file_name), sitk.sitkFloat32), 'filename': os.path.basename(file_name)} for file_name in tqdm(file_list)]
 	else :
 		segmentation_dataset = data_module.load_dataset("val")
@@ -214,9 +219,10 @@ def transform_and_upscale_predictions(preds) :
 		upscaled_preds.append(p)
 
 	if SAVE_PREDICTIONS :
-		if os.path.exists(SAVE_PREDICTIONS_DIR) :
-			shutil.rmtree(SAVE_PREDICTIONS_DIR)
-		os.mkdir(SAVE_PREDICTIONS_DIR)
+		# if os.path.exists(SAVE_PREDICTIONS_DIR) :
+		# 	shutil.rmtree(SAVE_PREDICTIONS_DIR)
+		if not os.path.exists(SAVE_PREDICTIONS_DIR) :
+			os.mkdir(SAVE_PREDICTIONS_DIR)
 
 		print("Saving prediction images...")
 		for i, p in tqdm(enumerate(prediction_sitk_imgs)) :
@@ -240,13 +246,13 @@ def compute_prediction_diffs(upscaled_preds, segmentation_objects) :
 
 def compute_and_print_metrics(segmentation_dataset, segmentation_objects, upscaled_preds) :
 	metrics_list = [
-		[["", ""], *[[v, v] for _,v in sorted(segmentation_dataset.get_labels().items(), key=lambda x: int(x[0]))]]
+		[["", ""], *[[v, v] for _,v in sorted(segmentation_dataset.get_labels().items(), key=lambda x: int(x[0]))[1:]]]
 	]
 	print("Computing metrics")
 	for i in tqdm(range(len(segmentation_objects))) :
 		fname = segmentation_objects[i]['filename']
 		metrics_list.append([[fname, fname]])
-		for j in range(NUM_CLASSES) :
+		for j in range(1, NUM_CLASSES) :
 			curr_gt_label = segmentation_objects[i]['label'].numpy(force=True)
 			curr_gt_label = np.einsum("d w h -> w h d", curr_gt_label)
 			curr_gt_label = np.ones_like(curr_gt_label) * (curr_gt_label == j)
@@ -276,6 +282,17 @@ def compute_and_print_metrics(segmentation_dataset, segmentation_objects, upscal
 			print(s[1], end="\t")
 		print("")
 	print("")
+
+	total_dice = 0
+	total_hd = 0
+	for score_sets in metrics_list[1:] :
+		for s in score_sets[1:] :
+			total_dice += s[0]
+			total_hd += s[1]
+	total_values = (len(metrics_list) * len(metrics_list[0]))
+
+	print("Mean DSC := %.3f, Mean HD95 := %.3f" % ((total_dice / total_values), (total_hd / total_values)))
+	
 
 
 if __name__ == "__main__" :

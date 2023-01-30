@@ -4,7 +4,7 @@ import math
 import os
 import sys
 import copy
-from typing import Optional
+from typing import Any, Callable, List, Optional
 
 import pytorch_lightning as pl
 import SimpleITK as sitk
@@ -28,7 +28,7 @@ COREGISTRATION_IMAGE_FILENAME = "coregistration_image" # + ".nii.gz"
 
 SKIP_PREPROCESSED_CHECK = False
 
-MICCAI_TASK = 1 # of 2
+CT_ONLY = True
 
 class MICCAIPreprocessor(SegmentationPreprocessor):
 	def __init__(self, channels_last: bool = True, normalize: bool = True):
@@ -36,12 +36,11 @@ class MICCAIPreprocessor(SegmentationPreprocessor):
 
 
 class MICCAIDataset(Dataset) :
-	def __init__(self, data, images_preprocessed_dir, metadata_task1, metadata_task2, transforms=None) :
+	def __init__(self, data, images_preprocessed_dir, metadata, transforms=None) :
 		self.data = [func() for func in tqdm(data)]
 		self.transforms = transforms
 		self.images_preprocessed_dir = images_preprocessed_dir
-		self.metadata_task1 = metadata_task1
-		self.metadata_task2 = metadata_task2
+		self.metadata = metadata
 
 	def set_transform(self, transforms) :
 		self.transforms = transforms
@@ -50,7 +49,7 @@ class MICCAIDataset(Dataset) :
 		return sitk.ReadImage(os.path.join(self.images_preprocessed_dir, COREGISTRATION_IMAGE_FILENAME + ".nii.gz"), sitk.sitkFloat64)
 
 	def get_labels(self) :
-		return self.metadata_task1["labels"]
+		return self.metadata["labels"]
 
 	def __getitem__(self, index):
 		sample = self.data[index]
@@ -62,16 +61,24 @@ class MICCAIDataset(Dataset) :
 		return len(self.data)
 
 
+def get_ct_only_dataset_files(l : List[Any], indexing_func: Callable[[Any], str] = lambda x: x['image']) :
+	# scans 500 and lower are ct scans
+	return list(filter(lambda x: int(os.path.basename(indexing_func(x)).split('.')[0].split("amos_")[-1]) <= 500, l))
+
+
 class MICCAILoader() :
 	IMAGES_TR = "imagesTr"
 	LABELS_TR = "labelsTr"
 	IMAGES_TR_PREPROCESSED = "imagesTr_preprocessed"
 	LABELS_TR_PREPROCESSED = "labelsTr_preprocessed"
 	
-	# NOTE: it appears that the train and test sets are combined for training epochs
-	TRAIN_SIZE = 60
+	IMAGES_VA = "imagesVa"
+	LABELS_VA = "labelsVa"
+	IMAGES_VA_PREPROCESSED = "imagesVa_preprocessed"
+	LABELS_VA_PREPROCESSED = "labelsVa_preprocessed"
+	
+	TRAIN_SIZE = 70
 	TEST_SIZE = 30
-	# VAL_SIZE = 10 # the rest
 	
 	BASIC_DATASET_ITEM = {'label' : None, 'image' : None, 'filename' : None}
 
@@ -86,48 +93,63 @@ class MICCAILoader() :
 			print("Cannot find dataset at specified root")
 			sys.exit(1)
 
-		self.images_dir = os.path.join(self.root, self.IMAGES_TR)
-		self.images_preprocessed_dir = os.path.join(self.root, self.IMAGES_TR_PREPROCESSED)
-		if not os.path.exists(self.images_dir) :
-			print("Cannot find imageTr inside dataset")
+		self.images_training_dir = os.path.join(self.root, self.IMAGES_TR)
+		self.images_validation_dir = os.path.join(self.root, self.IMAGES_VA)
+		self.images_training_preprocessed_dir = os.path.join(self.root, self.IMAGES_TR_PREPROCESSED)
+		self.images_validation_preprocessed_dir = os.path.join(self.root, self.IMAGES_VA_PREPROCESSED)
+		if not os.path.exists(self.images_training_dir) :
+			print("Cannot find %s inside dataset" % self.IMAGES_TR)
+			sys.exit(1)
+		if not os.path.exists(self.images_validation_dir) :
+			print("Cannot find %s inside dataset", self.IMAGES_VA)
 			sys.exit(1)
 
-		self.labels_dir = os.path.join(self.root, self.LABELS_TR)
-		self.labels_preprocessed_dir = os.path.join(self.root, self.LABELS_TR_PREPROCESSED)
-		if not os.path.exists(self.labels_dir) :
-			print("Cannot find labelsTr inside dataset")
+		self.labels_training_dir = os.path.join(self.root, self.LABELS_TR)
+		self.labels_validation_dir = os.path.join(self.root, self.LABELS_VA)
+		self.labels_training_preprocessed_dir = os.path.join(self.root, self.LABELS_TR_PREPROCESSED)
+		self.labels_validation_preprocessed_dir = os.path.join(self.root, self.LABELS_VA_PREPROCESSED)
+		if not os.path.exists(self.labels_training_dir) :
+			print("Cannot find %s inside dataset", self.LABELS_TR)
+			sys.exit(1)
+		if not os.path.exists(self.labels_validation_dir) :
+			print("Cannot find %s inside dataset", self.LABELS_VA)
 			sys.exit(1)
 		
-		self.metadata_task1 = {}
-		with open(os.path.join(self.root, "task1_dataset.json"), "r") as f :
-			self.metadata_task1 = json.load(f)
+		self.metadata = {}
+		with open(os.path.join(self.root, "dataset.json"), "r") as f :
+			self.metadata = json.load(f)
+
+		self._task_training_dataset = self.metadata['training']
+		self._task_validation_dataset = self.metadata['validation']
+
+		if CT_ONLY :
+			self._task_training_dataset = get_ct_only_dataset_files(self._task_training_dataset)
+			self._task_validation_dataset = get_ct_only_dataset_files(self._task_validation_dataset)
 		
-		self.metadata_task2 = {}
-		with open(os.path.join(self.root, "task2_dataset.json"), "r") as f :
-			self.metadata_task2 = json.load(f)
-
-		self._task_dataset = None
-		if MICCAI_TASK == 1 :
-			self._task_dataset = self.metadata_task1['training']
-		else :
-			self._task_dataset = self.metadata_task2['training']
-		self._no_files = len(self._task_dataset)
-
 		self.data = []
 		self._load_data(load_raw_instead)
 
 	def _load_data(self, load_raw_instead) :
 		coregister_image_and_labels = False
 
-		if not os.path.exists(self.images_preprocessed_dir) :
-			os.mkdir(self.images_preprocessed_dir)
-			os.mkdir(self.labels_preprocessed_dir)
+		if not os.path.exists(self.images_training_preprocessed_dir) :
+			os.mkdir(self.images_training_preprocessed_dir)
+			os.mkdir(self.labels_training_preprocessed_dir)
+			os.mkdir(self.images_validation_preprocessed_dir)
+			os.mkdir(self.labels_validation_preprocessed_dir)
 			coregister_image_and_labels = True
 		else :
-			for file_obj in self._task_dataset :
+			for file_obj in self._task_training_dataset :
 				filename = os.path.basename(file_obj['image'])
 
-				if not filename in os.listdir(self.images_preprocessed_dir) :
+				if not filename in os.listdir(self.images_training_preprocessed_dir) :
+					coregister_image_and_labels = True
+					break
+
+			for file_obj in self._task_validation_dataset :
+				filename = os.path.basename(file_obj['image'])
+
+				if not filename in os.listdir(self.images_validation_preprocessed_dir) :
 					coregister_image_and_labels = True
 					break
 
@@ -138,19 +160,14 @@ class MICCAILoader() :
 			
 			self._prepare_coregistration_image(image_info)
 
-			for i in tqdm(range(self._no_files)) :
-				image_object = self.data[i]
-
-				itk_img = sitk.ReadImage(os.path.join(self.images_dir, image_object['filename']), sitk.sitkFloat64)
-				itk_img_seg = sitk.ReadImage(os.path.join(self.labels_dir, image_object['filename']), sitk.sitkUInt8)
+			for image_object in tqdm(self.data['train']) :
+				itk_img = sitk.ReadImage(os.path.join(self.images_training_dir, image_object['filename']), sitk.sitkFloat64)
+				itk_img_seg = sitk.ReadImage(os.path.join(self.labels_training_dir, image_object['filename']), sitk.sitkUInt8)
 
 				original_image_size = itk_img.GetSize()
 
 				itk_img = sitk.DICOMOrient(itk_img, "RPI")
 				itk_img_seg = sitk.DICOMOrient(itk_img_seg, "RPI")
-
-				# print(image_object['filename'])
-				# print("orig", itk_img.GetSize())
 
 				# One scan will coregister to itself, but will be preprocessed in the same way as everythign else
 				itk_img, itk_img_seg, transformation, scaling = coregister_image_and_label(
@@ -159,61 +176,98 @@ class MICCAILoader() :
 					self.SCAN_TO_COREGISTER_TO[1]
 				)
 
-				# print("final size", itk_img.GetSize())
-
 				# Save coregistered and correctly sized images
-				sitk.WriteImage(itk_img, os.path.join(self.images_preprocessed_dir, image_object['filename']))
-				sitk.WriteImage(sitk.Cast(itk_img_seg, sitk.sitkUInt8), os.path.join(self.labels_preprocessed_dir, image_object['filename']))
+				sitk.WriteImage(itk_img, os.path.join(self.images_training_preprocessed_dir, image_object['filename']))
+				sitk.WriteImage(sitk.Cast(itk_img_seg, sitk.sitkUInt8), os.path.join(self.labels_training_preprocessed_dir, image_object['filename']))
 				if transformation != None :
-					sitk.WriteTransform(transformation, os.path.join(self.images_preprocessed_dir, image_object['filename'].replace(".nii.gz", "_transformation.tfm")))
-					with open(os.path.join(self.images_preprocessed_dir, image_object['filename'].replace(".nii.gz", "_metadata.json")), "w") as f :
+					sitk.WriteTransform(transformation, os.path.join(self.images_training_preprocessed_dir, image_object['filename'].replace(".nii.gz", "_transformation.tfm")))
+					with open(os.path.join(self.images_training_preprocessed_dir, image_object['filename'].replace(".nii.gz", "_metadata.json")), "w") as f :
 						f.write(json.dumps({"scaling": scaling, "original_size" : original_image_size}))
 
 				image_object['label'] = None
 				image_object['image'] = None
 
-		self.data = []
+			for image_object in tqdm(self.data['val']) :
+				itk_img = sitk.ReadImage(os.path.join(self.images_validation_dir, image_object['filename']), sitk.sitkFloat64)
+				itk_img_seg = sitk.ReadImage(os.path.join(self.labels_validation_dir, image_object['filename']), sitk.sitkUInt8)
+
+				original_image_size = itk_img.GetSize()
+
+				itk_img = sitk.DICOMOrient(itk_img, "RPI")
+				itk_img_seg = sitk.DICOMOrient(itk_img_seg, "RPI")
+
+				# One scan will coregister to itself, but will be preprocessed in the same way as everythign else
+				itk_img, itk_img_seg, transformation, scaling = coregister_image_and_label(
+					itk_img,
+					itk_img_seg,
+					self.SCAN_TO_COREGISTER_TO[1]
+				)
+
+				# Save coregistered and correctly sized images
+				sitk.WriteImage(itk_img, os.path.join(self.images_validation_preprocessed_dir, image_object['filename']))
+				sitk.WriteImage(sitk.Cast(itk_img_seg, sitk.sitkUInt8), os.path.join(self.labels_validation_preprocessed_dir, image_object['filename']))
+				if transformation != None :
+					sitk.WriteTransform(transformation, os.path.join(self.images_validation_preprocessed_dir, image_object['filename'].replace(".nii.gz", "_transformation.tfm")))
+					with open(os.path.join(self.images_validation_preprocessed_dir, image_object['filename'].replace(".nii.gz", "_metadata.json")), "w") as f :
+						f.write(json.dumps({"scaling": scaling, "original_size" : original_image_size}))
+
+				image_object['label'] = None
+				image_object['image'] = None
+
+		self.data = {'val':[], 'train':[]}
 
 		# Load all images
-		for file_object in tqdm(self._task_dataset) :
+		training_filenames = [os.path.basename(f['image']) for f in self._task_training_dataset]
+		for file_object in tqdm(self._task_training_dataset + self._task_validation_dataset) :
 			filename = os.path.basename(file_object['image']) # check the loading
 
-			def _get_image_from_filename(fname: str) :
+			def _get_image_from_filename(fname: str, images_dir:str, labels_dir:str, images_preprocessed_dir:str, labels_preprocessed_dir:str) :
 				image_object = copy.copy(self.BASIC_DATASET_ITEM)
 				image_object['filename'] = fname
 				
 				if load_raw_instead :
-					itk_img = sitk.ReadImage(os.path.join(self.images_dir, image_object['filename']), sitk.sitkFloat64)
+					itk_img = sitk.ReadImage(os.path.join(images_dir, image_object['filename']), sitk.sitkFloat64)
 					itk_img = sitk.DICOMOrient(itk_img, "RPI")
 					# cast array as torch cannot convert arrays of dtype=np.uint16 and transformations require floating point data
 					# img = torch.from_numpy(sitk.GetArrayFromImage(itk_img))
 					image_object['image'] = itk_img
 
-					itk_img_seg = sitk.ReadImage(os.path.join(self.labels_dir, image_object['filename']), sitk.sitkUInt8)
+					itk_img_seg = sitk.ReadImage(os.path.join(labels_dir, image_object['filename']), sitk.sitkUInt8)
 					itk_img_seg = sitk.DICOMOrient(itk_img_seg, "RPI")
 					img_seg = torch.from_numpy(sitk.GetArrayFromImage(itk_img_seg))
 					image_object['label'] = img_seg
 				
 				else :
-					itk_img = sitk.ReadImage(os.path.join(self.images_preprocessed_dir, image_object['filename']), sitk.sitkFloat64)
+					itk_img = sitk.ReadImage(os.path.join(images_preprocessed_dir, image_object['filename']), sitk.sitkFloat64)
 					itk_img = sitk.DICOMOrient(itk_img, "RPI")
 					# cast array as torch cannot convert arrays of dtype=np.uint16 and transformations require floating point data
 					img = torch.from_numpy(sitk.GetArrayFromImage(itk_img))
 
-					itk_img_seg = sitk.ReadImage(os.path.join(self.labels_preprocessed_dir, image_object['filename']), sitk.sitkUInt8)
+					itk_img_seg = sitk.ReadImage(os.path.join(labels_preprocessed_dir, image_object['filename']), sitk.sitkUInt8)
 					itk_img_seg = sitk.DICOMOrient(itk_img_seg, "RPI")
 					img_seg = torch.from_numpy(sitk.GetArrayFromImage(itk_img_seg))
 
 					image_object['image'] = img
 					image_object['label'] = img_seg
-					image_object['transformation'] = sitk.ReadTransform(os.path.join(self.images_preprocessed_dir, image_object['filename']).replace(".nii.gz", "_transformation.tfm"))
-					with open(os.path.join(self.images_preprocessed_dir, image_object['filename'].replace(".nii.gz", "_metadata.json")), "r") as f :
+					image_object['transformation'] = sitk.ReadTransform(os.path.join(images_preprocessed_dir, image_object['filename']).replace(".nii.gz", "_transformation.tfm"))
+					with open(os.path.join(images_preprocessed_dir, image_object['filename'].replace(".nii.gz", "_metadata.json")), "r") as f :
 						for k,v in json.load(f).items() :
 							image_object[k] = v
 
 				return image_object
 				
-			self.data.append(partial(_get_image_from_filename, filename))
+			dataset = 'train' if filename in training_filenames else 'val'
+			is_in_training_dataset = (dataset == 'train')
+			self.data[dataset].append(
+				partial(
+					_get_image_from_filename,
+					filename,
+					self.images_training_dir if is_in_training_dataset else self.images_validation_dir,
+					self.labels_training_dir if is_in_training_dataset else self.labels_validation_dir,
+					self.images_training_preprocessed_dir if is_in_training_dataset else self.images_validation_preprocessed_dir,
+					self.labels_training_preprocessed_dir if is_in_training_dataset else self.labels_validation_preprocessed_dir,
+				)
+			)
 
 	def _prepare_coregistration_image(self, image_info) :
 		# Resample for largest scalings
@@ -304,17 +358,19 @@ class MICCAILoader() :
 			"and spacings", self.SCAN_TO_COREGISTER_TO[1].GetSpacing()
 		)
 
-		sitk.WriteImage(self.SCAN_TO_COREGISTER_TO[1], os.path.join(self.images_preprocessed_dir, COREGISTRATION_IMAGE_FILENAME + ".nii.gz"))
+		sitk.WriteImage(self.SCAN_TO_COREGISTER_TO[1], os.path.join(self.images_training_preprocessed_dir, COREGISTRATION_IMAGE_FILENAME + ".nii.gz"))
 
 	def _find_coregistration_scan(self) :
 		image_info = ImageInfo()
 		largest_size = 0
 
-		for file_obj in tqdm(self._task_dataset) :
+		self.data = {'train':[], 'val':[]}
+
+		for file_obj in tqdm(self._task_training_dataset) :
 			filename = os.path.basename(file_obj['image'])
 
-			itk_img = sitk.ReadImage(os.path.join(self.images_dir, filename), sitk.sitkFloat32)
-			itk_img_seg = sitk.ReadImage(os.path.join(self.labels_dir, filename), sitk.sitkUInt8)
+			itk_img = sitk.ReadImage(os.path.join(self.images_training_dir, filename), sitk.sitkFloat32)
+			itk_img_seg = sitk.ReadImage(os.path.join(self.labels_training_dir, filename), sitk.sitkUInt8)
 
 			itk_img = sitk.DICOMOrient(itk_img, "RPI")
 			itk_img_seg = sitk.DICOMOrient(itk_img_seg, "RPI")
@@ -323,7 +379,7 @@ class MICCAILoader() :
 			image_object['label'] = None
 			image_object['image'] = None
 			image_object['filename'] = filename
-			self.data.append(image_object)
+			self.data['train'].append(image_object)
 
 			world_image_width = itk_img.GetWidth() * itk_img.GetSpacing()[0]
 			world_image_height = itk_img.GetHeight() * itk_img.GetSpacing()[1]
@@ -341,12 +397,26 @@ class MICCAILoader() :
 			image_info.world_size_width_height = max(world_image_height, world_image_width, image_info.world_size_width_height)
 			image_info.world_size_depth = max(world_image_depth, image_info.world_size_depth)
 
+		for file_obj in tqdm(self._task_validation_dataset) :
+			filename = os.path.basename(file_obj['image'])
+
+			image_object = copy.copy(self.BASIC_DATASET_ITEM)
+			image_object['filename'] = filename
+			self.data['val'].append(image_object)
+
 		return image_info
 
 	def get_split(self, split) :
-		_training_split = int(self._no_files * (self.TRAIN_SIZE / 100))
-		_test_split = int(self._no_files * (self.TEST_SIZE / 100))
-		_val_split = self._no_files - (_training_split + _test_split)
+		used_dataset = 'train'
+		_no_files = 0
+		if split == "train" or split == "test" :
+			_no_files = len(self._task_training_dataset)
+		else :
+			used_dataset = "val"
+			_no_files = len(self._task_validation_dataset)
+
+		_training_split = int(_no_files * (self.TRAIN_SIZE / 100))
+		_test_split = int(_no_files - _training_split)
 
 		start_location = 0
 		split_size = 1
@@ -357,16 +427,16 @@ class MICCAILoader() :
 			start_location = _training_split
 			split_size = start_location + _test_split
 		elif split == "val" :
-			start_location = _training_split + _test_split
-			split_size = start_location + _val_split
+			start_location = 0
+			split_size = len(self._task_validation_dataset)
 
-		return MICCAIDataset(self.data[start_location:split_size], self.images_preprocessed_dir, self.metadata_task1, self.metadata_task2)
+		return MICCAIDataset(self.data[used_dataset][start_location:split_size], self.images_training_preprocessed_dir, self.metadata)
 
 
 class MICCAIDataModule(pl.LightningDataModule):
 	def __init__(
 		self,
-		dataset_dir: str = "AMOS22",
+		dataset_dir: str = "amos22",
 		normalize: bool = True,
 		channels_last: bool = True,
 		random_crop: Optional[int] = None,
