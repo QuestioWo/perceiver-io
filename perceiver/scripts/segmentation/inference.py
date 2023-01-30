@@ -19,16 +19,25 @@ from perceiver.model.segmentation.segmentation import SLABS_DEPTH, SLABS_START, 
 from perceiver.data.segmentation.common import coregister_image, zoom_sitk_image_label
 from perceiver.data.segmentation.miccai import IMAGE_SIZE, NUM_CLASSES, MICCAIDataModule, MICCAIPreprocessor
 
-DEFAULT_SLICE = 42
-DISPLAY_DIFFS = False
+DATASET_ROOT = "AMOS22"
+
 BATCH_SIZE = 1
-USE_CUDA = False
+USE_CUDA = True
 COLS, ROWS = 3, 3
+
+LOAD_SPECIFIC_VERSION = 'correct_10_overlap_5'
 USE_LAST_CHECKPOINT = False
-SAVE_PREDICTIONS = True
-SAVE_PREDICTIONS_DIR = "labelsTs"
-COMPUTE_METRICS = True
+
+GENERATE_MICCAI_TASK_1_RESULTS = True
+SAVE_PREDICTIONS = GENERATE_MICCAI_TASK_1_RESULTS and True
+SAVE_PREDICTIONS_DIR = "results"
+COMPUTE_METRICS = not GENERATE_MICCAI_TASK_1_RESULTS and True
 COMPUTE_INFERENCE_TIMES = True
+
+DISPLAY_DIFFS = GENERATE_MICCAI_TASK_1_RESULTS and False
+DEFAULT_SLICE = 42
+DISPLAY_UPSCALED_INFERENCE_RESULTS = True
+
 
 def atoi(text):
 	return int(text) if text.isdigit() else text
@@ -116,7 +125,8 @@ def load_model() :
 	base_logs = os.path.join('logs', 'miccai_seg')
 	most_recent_version = os.path.join(base_logs, sorted(os.listdir(base_logs), key=natural_keys)[-1])
 	most_recent_checkpoints = os.path.join(most_recent_version, 'checkpoints')
-	# most_recent_checkpoints = os.path.join(os.path.join(base_logs, "version_12"), 'checkpoints')
+	if LOAD_SPECIFIC_VERSION != None :
+		most_recent_checkpoints = os.path.join(os.path.join(base_logs, LOAD_SPECIFIC_VERSION), 'checkpoints')
 	all_ckpts = list(filter(lambda x: x.startswith("epoch"), os.listdir(most_recent_checkpoints)))
 	sorted_ckpts = sorted(all_ckpts, key=lambda x: float(x.split("val_loss=")[-1].split(".ckpt")[0]))
 	best_ckpt = sorted_ckpts[0]
@@ -134,31 +144,33 @@ def load_model() :
 
 
 def load_and_preprocess_data() :
-	data_module = MICCAIDataModule(root="AMOS22", load_raw_instead=True)
+	data_module = MICCAIDataModule(root=DATASET_ROOT, load_raw_instead=True)
 	print("Loading and preprocessing validation dataset...")
-	segmentation_dataset = data_module.load_dataset("val")
+	segmentation_dataset = data_module.load_dataset()
 	miccai_preproc = MICCAIPreprocessor()
 
-	segmentation_objects = [segmentation_dataset[-i] for i in range(COLS * ROWS)]
-
-	imgs_raw = [torch.from_numpy(sitk.GetArrayFromImage(segmentation_objects[i]['image'])) for i in range(len(segmentation_objects))]
-	imgs_raw = [miccai_preproc.preprocess_batch([raw_img])[0] for raw_img in imgs_raw]
-	imgs_raw = [raw_img for raw_img in imgs_raw]
+	segmentation_objects = []
+	if GENERATE_MICCAI_TASK_1_RESULTS :
+		file_list = segmentation_dataset.metadata_task1['test']
+		segmentation_objects = [{'image': sitk.ReadImage(os.path.join(DATASET_ROOT, file_name), sitk.sitkFloat32), 'filename': os.path.basename(file_name)} for file_name in tqdm(file_list)]
+	else :
+		segmentation_dataset = data_module.load_dataset("val")
+		segmentation_objects = [segmentation_dataset[-i] for i in range(COLS * ROWS)]
 
 	print("Coregistering scans for inference...")
-	coregistered_images = [coregister_image(segmentation_objects[i]['image'], segmentation_dataset.get_coregistration_image()) for i in tqdm(range(len(segmentation_objects)))]
+	coregistered_images = [coregister_image(sitk.Cast(segmentation_objects[i]['image'], sitk.sitkFloat64), segmentation_dataset.get_coregistration_image()) for i in tqdm(range(len(segmentation_objects)))]
 
 	coregistered_transformations = [obj[1] for obj in coregistered_images]
 	imgs = [torch.from_numpy(sitk.GetArrayFromImage(obj[0])) for obj in coregistered_images]
 
 	imgs = miccai_preproc.preprocess_batch(imgs)
 
-	return (segmentation_dataset, segmentation_objects, imgs, coregistered_images, coregistered_transformations, imgs_raw)
+	return (segmentation_dataset, segmentation_objects, imgs, coregistered_images, coregistered_transformations, miccai_preproc)
 
 
-def perform_inferences(total_inferences, imgs, model) :
+def perform_inferences(imgs, model) :
 	preds = []
-	for i in tqdm(range(total_inferences)) : 
+	for i in tqdm(range(len(imgs) // BATCH_SIZE)) : 
 		with torch.no_grad():
 			if BATCH_SIZE == 1 :
 				raw_imgs = [imgs[i]]
@@ -279,20 +291,19 @@ if __name__ == "__main__" :
 
 	model.to(device=dev)
 
-	segmentation_dataset, segmentation_objects, imgs, coregistered_images, coregistered_transformations, imgs_raw =  load_and_preprocess_data()
+	segmentation_dataset, segmentation_objects, imgs, coregistered_images, coregistered_transformations, miccai_preproc =  load_and_preprocess_data()
 
 	copy_of_imgs = [torch.clone(i[:,:,SLICE_INDEX_FROM:SLICE_INDEX_TO]) for i in imgs]
 
 	# Perform inference and get predictions
 	print("Performing inferences...")
 	start = time.clock_gettime(0)
-	total_inferences = (COLS * ROWS) // BATCH_SIZE
 
-	preds = perform_inferences(total_inferences, imgs, model)
+	preds = perform_inferences(imgs, model)
 
 	if COMPUTE_INFERENCE_TIMES :
 		end = time.clock_gettime(0)
-		print("Average inference time := %s" %(str((end - start) / total_inferences)))
+		print("Average inference time := %s" %(str((end - start) / len(imgs))))
 
 	# Transform and scale labels back to original size
 	upscaled_preds = transform_and_upscale_predictions(preds)
@@ -306,8 +317,22 @@ if __name__ == "__main__" :
 	if COMPUTE_METRICS :
 		compute_and_print_metrics(segmentation_dataset, segmentation_objects, upscaled_preds)
 
-	# tracker = IndexTrackers(axes, copy_of_imgs, preds, diffs, segmentation_objects)
-	tracker = IndexTrackers(axes, imgs_raw, upscaled_preds, diffs, segmentation_objects)
+	print("Preprocessing raw images...")
+	imgs_raw = []
+	for i in tqdm(range(len(segmentation_objects))) :
+		imgs_raw.append(
+			miccai_preproc.preprocess_batch([
+				torch.from_numpy(sitk.GetArrayFromImage(segmentation_objects[i]['image']))
+			])[0]
+		)
+		segmentation_objects[i]['image'] = None
+
+	tracker = None
+	if DISPLAY_UPSCALED_INFERENCE_RESULTS :
+		tracker = IndexTrackers(axes, imgs_raw, upscaled_preds, diffs, segmentation_objects)
+	else :
+		tracker = IndexTrackers(axes, copy_of_imgs, preds, diffs, segmentation_objects)
+	
 	fig.canvas.mpl_connect('scroll_event', tracker.on_scroll)
 
-	# plt.show()
+	plt.show()

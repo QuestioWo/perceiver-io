@@ -5,3 +5,5 @@ __pycache__/
 logs/
 AMOS22/
 labelsTs/
+results/
+*.nii.gz
