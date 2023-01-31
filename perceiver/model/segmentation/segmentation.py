@@ -57,7 +57,7 @@ class SegmentationDecoderConfig(DecoderConfig):
 @dataclass
 class SegmentationEncoderConfig(EncoderConfig):
 	image_shape: Tuple[int, int, int] = (IMAGE_SIZE[1], IMAGE_SIZE[2], SLABS_SIZE+SLABS_RECURSION_OVERLAP)
-	num_frequency_bands: int = 64
+	num_frequency_bands: int = 16
 
 class DiceLoss(nn.Module):
     def __init__(self, n_classes):
@@ -91,17 +91,17 @@ class DiceLoss(nn.Module):
         assert inputs.size() == target.size(), 'predict {} & target {} shape do not match'.format(inputs.size(), target.size())
         class_wise_dice = []
         loss = 0.0
-        for i in range(0, self.n_classes):
+        for i in range(1, self.n_classes): # NOTE: skip/ignore background dice
             dice = self._dice_loss(inputs[:, i], target[:, i])
             class_wise_dice.append(1.0 - dice.item())
             loss += dice * weight[i]
-        return loss / self.n_classes
+        return loss / (self.n_classes - 1) # NOTE: average loss correctly
 
 class LitMapper(LitModel):
 	def __init__(self, *args: Any, **kwargs: Any):
 		super().__init__(*args, **kwargs)
 		self.ce_loss = nn.CrossEntropyLoss()
-		self.dice_loss = DiceLoss(NUM_CLASSES)
+		# self.dice_loss = DiceLoss(NUM_CLASSES)
 		# self.loss = SegmentationClassificationLoss()
 		self.dice = tm.Dice()
 		self.acc = tm.classification.accuracy.Accuracy(task="multiclass", num_classes=NUM_CLASSES, mdmc_reduce="global")
@@ -112,9 +112,10 @@ class LitMapper(LitModel):
 		y = y[:,:,:,SLABS_START:SLABS_START+SLABS_DEPTH]
 		
 		ce_loss = self.ce_loss(logits, y.long())
-		dice_loss = self.dice_loss(logits, y.long(), softmax=True)
+		# dice_loss = self.dice_loss(logits, y.long(), softmax=True)
 		# loss = 0.4 * ce_loss + 0.6 * dice_loss
-		loss = dice_loss
+		loss = ce_loss
+		# loss = dice_loss
 
 		y_pred = logits.argmax(dim=1).int()
 		dice_acc = self.dice(y_pred, y)
