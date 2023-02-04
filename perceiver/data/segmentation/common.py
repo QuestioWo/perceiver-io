@@ -8,7 +8,7 @@ import numpy as np
 
 from scipy.ndimage import zoom
 
-GRADIENT_DESCENT_ITERATIONS = 100
+GRADIENT_DESCENT_ITERATIONS = 500
 
 class SegmentationPreprocessor:
 	def __init__(self, transform):

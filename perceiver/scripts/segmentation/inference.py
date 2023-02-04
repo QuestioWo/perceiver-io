@@ -1,7 +1,5 @@
-import math
 import os
 import re
-import shutil
 import time
 
 from typing import List, Tuple
@@ -15,28 +13,29 @@ from matplotlib.axes import Axes
 from tqdm import tqdm
 from medpy import metric
 
-from perceiver.model.segmentation.segmentation import SLABS_DEPTH, SLABS_START, DiceLoss, LitSegmentationMapper, SLICE_INDEX_FROM, SLICE_INDEX_TO
-from perceiver.data.segmentation.common import coregister_image, zoom_sitk_image_label
+from perceiver.model.segmentation.segmentation import SLABS_DEPTH, SLABS_START, LitSegmentationMapper, SLICE_INDEX_FROM, SLICE_INDEX_TO
+from perceiver.data.segmentation.common import coregister_image
 from perceiver.data.segmentation.miccai import CT_ONLY, IMAGE_SIZE, NUM_CLASSES, MICCAIDataModule, MICCAIPreprocessor, get_ct_only_dataset_files
 
 DATASET_ROOT = "amos22"
 
 BATCH_SIZE = 1
 USE_CUDA = True
-COLS, ROWS = 3, 3
+COLS, ROWS = 5, 5
 
-LOAD_SPECIFIC_VERSION = 'correct_10_overlap_5'
+LOAD_SPECIFIC_VERSION = 'correct_11_recusive_2_overlap_5_ce_only'
 USE_LAST_CHECKPOINT = False
 
-GENERATE_MICCAI_TEST_RESULTS = True
-SAVE_PREDICTIONS = GENERATE_MICCAI_TEST_RESULTS and True
+GENERATE_MICCAI_TEST_RESULTS = False
+SAVE_PREDICTIONS = GENERATE_MICCAI_TEST_RESULTS or True
 SAVE_PREDICTIONS_DIR = "results"
 COMPUTE_METRICS = not GENERATE_MICCAI_TEST_RESULTS and True
 COMPUTE_INFERENCE_TIMES = True
+COREGISTER_IMAGES = not GENERATE_MICCAI_TEST_RESULTS and False
 
-DISPLAY_DIFFS = GENERATE_MICCAI_TEST_RESULTS and False
+DISPLAY_DIFFS = not GENERATE_MICCAI_TEST_RESULTS and False
 DEFAULT_SLICE = 42
-DISPLAY_UPSCALED_INFERENCE_RESULTS = True
+DISPLAY_UPSCALED_INFERENCE_RESULTS = False
 
 
 def atoi(text):
@@ -58,7 +57,6 @@ class IndexTrackers:
 		
 		for i in range(len(axes)) :
 			ax = self.axes[i]
-			# plt.axis('off')
 			gt_obj = segmentation_dataset[i]
 
 			ax.set_title('file: %s' % (str(gt_obj['filename'])))
@@ -107,7 +105,8 @@ class IndexTrackers:
 				# print("\tdiffs, good vs bad", np.bincount(self.masks[i][:,:,self.ind].flatten()), "accuracy :=", 1 - (np.sum(self.masks[i][:,:,self.ind]) / self.masks[i][:,:,self.ind].flatten().shape[0]))
 
 			except Exception :
-				print("\tfailed update")
+				# print("\tfailed update")
+				pass
 
 
 def calculate_metrics(pred: np.ndarray, gt: np.ndarray) -> Tuple[float, float]:
@@ -156,14 +155,22 @@ def load_and_preprocess_data() :
 			file_list = [f['image'] for f in get_ct_only_dataset_files(file_list)]
 
 		file_list = file_list[:len(file_list) // 2]
+		# file_list = file_list[len(file_list) // 2:]
 
 		segmentation_objects = [{'image': sitk.ReadImage(os.path.join(DATASET_ROOT, file_name), sitk.sitkFloat32), 'filename': os.path.basename(file_name)} for file_name in tqdm(file_list)]
 	else :
 		segmentation_dataset = data_module.load_dataset("val")
 		segmentation_objects = [segmentation_dataset[-i] for i in range(COLS * ROWS)]
 
-	print("Coregistering scans for inference...")
-	coregistered_images = [coregister_image(sitk.Cast(segmentation_objects[i]['image'], sitk.sitkFloat64), segmentation_dataset.get_coregistration_image()) for i in tqdm(range(len(segmentation_objects)))]
+	if COREGISTER_IMAGES :
+		print("Coregistering scans for inference...")
+		coregistered_images = [coregister_image(sitk.Cast(segmentation_objects[i]['image'], sitk.sitkFloat64), segmentation_dataset.get_coregistration_image()) for i in tqdm(range(len(segmentation_objects)))]
+	else :
+		print("Loading precoregistered scans for inference...")
+		# segmentation_objects = [{"image" : None, "label" : obj['label'], "filename": obj['filename']} for obj in segmentation_objects]
+		_accompanying_transformations = [sitk.ReadTransform(os.path.join(DATASET_ROOT, "imagesVa_preprocessed", f['filename'].replace(".nii.gz", "_transformation.tfm"))) for f in segmentation_objects]
+		_coregistered_images_only = [sitk.ReadImage(os.path.join(DATASET_ROOT, "imagesVa_preprocessed", f['filename']), sitk.sitkFloat64) for f in tqdm(segmentation_objects)]
+		coregistered_images = list(zip(_coregistered_images_only, _accompanying_transformations))
 
 	coregistered_transformations = [obj[1] for obj in coregistered_images]
 	imgs = [torch.from_numpy(sitk.GetArrayFromImage(obj[0])) for obj in coregistered_images]
