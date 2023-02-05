@@ -2,7 +2,7 @@ import os
 import re
 import time
 
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import torch
 import numpy as np
@@ -120,19 +120,23 @@ def calculate_metrics(pred: np.ndarray, gt: np.ndarray) -> Tuple[float, float]:
         return 0, 0
 
 
-def load_model() :
-	base_logs = os.path.join('logs', 'miccai_seg')
-	most_recent_version = os.path.join(base_logs, sorted(os.listdir(base_logs), key=natural_keys)[-1])
-	most_recent_checkpoints = os.path.join(most_recent_version, 'checkpoints')
-	if LOAD_SPECIFIC_VERSION != None :
-		most_recent_checkpoints = os.path.join(os.path.join(base_logs, LOAD_SPECIFIC_VERSION), 'checkpoints')
-	all_ckpts = list(filter(lambda x: x.startswith("epoch"), os.listdir(most_recent_checkpoints)))
-	sorted_ckpts = sorted(all_ckpts, key=lambda x: float(x.split("val_loss=")[-1].split(".ckpt")[0]))
-	best_ckpt = sorted_ckpts[0]
-	ckpt = os.path.join(most_recent_checkpoints, best_ckpt)
-
-	if USE_LAST_CHECKPOINT :
-		ckpt = os.path.join(most_recent_checkpoints, "last.ckpt")
+def load_model(ckpt_filename:Optional[str]) :
+	if ckpt_filename == None :
+		base_logs = os.path.join('logs', 'miccai_seg')
+		most_recent_version = os.path.join(base_logs, sorted(os.listdir(base_logs), key=natural_keys)[-1])
+		most_recent_checkpoints = os.path.join(most_recent_version, 'checkpoints')
+		if LOAD_SPECIFIC_VERSION != None :
+			most_recent_checkpoints = os.path.join(os.path.join(base_logs, LOAD_SPECIFIC_VERSION), 'checkpoints')
+		all_ckpts = list(filter(lambda x: x.startswith("epoch"), os.listdir(most_recent_checkpoints)))
+		sorted_ckpts = sorted(all_ckpts, key=lambda x: float(x.split("val_loss=")[-1].split(".ckpt")[0]))
+		best_ckpt = sorted_ckpts[0]
+		ckpt = os.path.join(most_recent_checkpoints, best_ckpt)
+		
+		if USE_LAST_CHECKPOINT :
+			ckpt = os.path.join(most_recent_checkpoints, "last.ckpt")
+	
+	else :
+		ckpt = ckpt_filename
 
 	print("Loading %s checkpoint file..." % (ckpt))
 
@@ -180,15 +184,15 @@ def load_and_preprocess_data() :
 	return (segmentation_dataset, segmentation_objects, imgs, coregistered_images, coregistered_transformations, miccai_preproc)
 
 
-def perform_inferences(imgs, model) :
+def perform_inferences(imgs, model, device, batch_size) :
 	preds = []
-	for i in tqdm(range(len(imgs) // BATCH_SIZE)) : 
+	for i in tqdm(range(len(imgs) // batch_size)) : 
 		with torch.no_grad():
-			if BATCH_SIZE == 1 :
+			if batch_size == 1 :
 				raw_imgs = [imgs[i]]
 			else :
-				raw_imgs = imgs[i:i+BATCH_SIZE]
-			inputs = {"image":torch.stack(raw_imgs).to(device=dev),"label":None}
+				raw_imgs = imgs[i:i+batch_size]
+			inputs = {"image":torch.stack(raw_imgs).to(device=device),"label":None}
 
 			logits, _ = model(inputs)
 			predictions = logits.argmax(dim=1).int().numpy(force=True)
@@ -198,7 +202,7 @@ def perform_inferences(imgs, model) :
 	return preds
 
 
-def transform_and_upscale_predictions(preds) :
+def transform_and_upscale_predictions(preds, coregistered_images, coregistered_transformations, segmentation_objects, save_predictions:bool=SAVE_PREDICTIONS, save_predictions_dir:str=SAVE_PREDICTIONS_DIR) :
 	print("Upscaling predictions...")
 	upscaled_preds = []
 	prediction_sitk_imgs = []
@@ -225,15 +229,15 @@ def transform_and_upscale_predictions(preds) :
 		
 		upscaled_preds.append(p)
 
-	if SAVE_PREDICTIONS :
-		# if os.path.exists(SAVE_PREDICTIONS_DIR) :
-		# 	shutil.rmtree(SAVE_PREDICTIONS_DIR)
-		if not os.path.exists(SAVE_PREDICTIONS_DIR) :
-			os.mkdir(SAVE_PREDICTIONS_DIR)
+	if save_predictions :
+		# if os.path.exists(save_predictions_dir) :
+		# 	shutil.rmtree(save_predictions_dir)
+		if not os.path.exists(save_predictions_dir) :
+			os.mkdir(save_predictions_dir)
 
 		print("Saving prediction images...")
 		for i, p in tqdm(enumerate(prediction_sitk_imgs)) :
-			out_fname = os.path.join(SAVE_PREDICTIONS_DIR, "%s.nii.gz" % (segmentation_objects[i]['filename']))
+			out_fname = os.path.join(save_predictions_dir, "%s.nii.gz" % (segmentation_objects[i]['filename']))
 			sitk.WriteImage(p, out_fname)
 
 	return upscaled_preds
@@ -299,10 +303,9 @@ def compute_and_print_metrics(segmentation_dataset, segmentation_objects, upscal
 	total_values = (len(metrics_list) * len(metrics_list[0]))
 
 	print("Mean DSC := %.3f, Mean HD95 := %.3f" % ((total_dice / total_values), (total_hd / total_values)))
-	
 
 
-if __name__ == "__main__" :
+def main() :
 	model = load_model()
 
 	cuda = USE_CUDA and torch.cuda.is_available()
@@ -323,14 +326,14 @@ if __name__ == "__main__" :
 	print("Performing inferences...")
 	start = time.clock_gettime(0)
 
-	preds = perform_inferences(imgs, model)
+	preds = perform_inferences(imgs, model, dev)
 
 	if COMPUTE_INFERENCE_TIMES :
 		end = time.clock_gettime(0)
 		print("Average inference time := %s" %(str((end - start) / len(imgs))))
 
 	# Transform and scale labels back to original size
-	upscaled_preds = transform_and_upscale_predictions(preds)
+	upscaled_preds = transform_and_upscale_predictions(preds, coregistered_images, coregistered_transformations, segmentation_objects)
 
 	fig, axes = plt.subplots(ROWS, COLS)
 	axes = axes.flatten()
@@ -360,3 +363,6 @@ if __name__ == "__main__" :
 	fig.canvas.mpl_connect('scroll_event', tracker.on_scroll)
 
 	plt.show()
+
+if __name__ == "__main__" :
+	main()

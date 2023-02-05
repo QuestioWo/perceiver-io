@@ -3,3 +3,9 @@ docs
 logs*
 notebooks
 tests
+amos22
+results
+venv
+!best.ckpt
+!coregistration_image.nii.gz
+!run_inference.py

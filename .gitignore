@@ -8,3 +8,5 @@ labelsTs/
 results/
 *.nii.gz
 *.zip
+*.ckpt
+coregistration_image.nii.gz
