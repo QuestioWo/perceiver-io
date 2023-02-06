@@ -120,7 +120,7 @@ def calculate_metrics(pred: np.ndarray, gt: np.ndarray) -> Tuple[float, float]:
         return 0, 0
 
 
-def load_model(ckpt_filename:Optional[str]) :
+def load_model(ckpt_filename:Optional[str]=None) :
 	if ckpt_filename == None :
 		base_logs = os.path.join('logs', 'miccai_seg')
 		most_recent_version = os.path.join(base_logs, sorted(os.listdir(base_logs), key=natural_keys)[-1])

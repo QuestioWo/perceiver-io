@@ -22,7 +22,7 @@ def main(args):
 if __name__ == "__main__":
     parser = jsonargparse.ArgumentParser(description="Preprocess dataset for training")
     parser.add_argument("dataset", default="miccai", choices=list(DATAMODULE_CLASSES.keys()))
-    parser.add_argument("--dataset_dir", default="amos22", type=str)
+    parser.add_argument("--dataset_dir", default="/mnt/d/amos22", type=str)
     parser.add_argument("--normalize", default=True, type=bool)
     parser.add_argument("--channels_last", default=True, type=bool)
     parser.add_argument("--random_crop", type=Optional[int])

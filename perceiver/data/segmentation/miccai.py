@@ -430,13 +430,14 @@ class MICCAILoader() :
 			start_location = 0
 			split_size = len(self._task_validation_dataset)
 
+		print("Loading", split, "dataset...")
 		return MICCAIDataset(self.data[used_dataset][start_location:split_size], self.images_training_preprocessed_dir, self.metadata)
 
 
 class MICCAIDataModule(pl.LightningDataModule):
 	def __init__(
 		self,
-		dataset_dir: str = "amos22",
+		dataset_dir: str = "/mnt/d/amos22",
 		normalize: bool = True,
 		channels_last: bool = True,
 		random_crop: Optional[int] = None,
