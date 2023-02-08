@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# See examples for running in perceiver/scripts/segmentation/docker_inference.py script
+
 model_path=$1
 coregistration_image_path=$2
 tagname=$3
@@ -15,7 +17,7 @@ if [[ -z $coregistration_image_path ]]; then
 fi
 
 if [[ -z $tagname ]]; then
-	tagname="ghcr.io/QuestioWo/miccai-perceiver-io:latest"
+	tagname="ghcr.io/questiowo/miccai-perceiver-io:latest"
 fi
 
 echo "NOTE: This script must be ran with sudo when used on Ubuntu"

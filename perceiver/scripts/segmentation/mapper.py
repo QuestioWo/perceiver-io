@@ -15,8 +15,8 @@ class SegmentationMapperCLI(CLI):
 			# NOTE: attention is the largest drain on compute time, likely a
 			# linear mapping of attention to increase in inference time
 			{
-				"model.num_latents": 512, # ((IMAGE_SIZE_XY//8) * (IMAGE_SIZE_XY//8) * 1)
-				"model.num_latent_channels": 128, # ((IMAGE_SIZE_XY) // 2)
+				"model.num_latents": 1024, # ((IMAGE_SIZE_XY//8) * (IMAGE_SIZE_XY//8) * 1)
+				"model.num_latent_channels": 512, # ((IMAGE_SIZE_XY) // 2)
 				
 				"model.encoder.num_frequency_bands": 4, # (NUM_CLASSES)
 				"model.encoder.num_cross_attention_layers": 2, # IMAGE_SIZE_XY//16

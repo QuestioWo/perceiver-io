@@ -13,7 +13,7 @@ from perceiver.scripts.segmentation.inference import load_model, perform_inferen
 
 # To build and run the docker image, the following commands can be used as starting point:
 """
-sudo bash scripts/docker_build.sh \
+sudo ./scripts/docker_build.sh \
 	logs/miccai_seg/correct_11_recusive_2_overlap_5_ce_only/checkpoints/epoch\=264-val_loss\=0.102.ckpt \
 	/mnt/d/amos22/imagesTr_preprocessed/coregistration_image.nii.gz &&
 sudo docker run -it --rm --runtime=nvidia --ipc=host  -e NVIDIA_VISIBLE_DEVICES=all \
