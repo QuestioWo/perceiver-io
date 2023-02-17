@@ -14,13 +14,12 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 from tqdm import tqdm
-from skimage.transform import rescale
 
 from perceiver.data.segmentation.common import channels_to_last, SegmentationPreprocessor, lift_transform, coregister_image_and_label, ImageInfo, zoom_sitk_image_image, zoom_sitk_image_label
 
 IMAGE_SIZE = (220, 256, 256)
-IMAGE_SIZE = (165, 192, 192)
-IMAGE_SIZE = (110, 128, 128)
+# IMAGE_SIZE = (165, 192, 192)
+# IMAGE_SIZE = (110, 128, 128)
 # IMAGE_SIZE = (55, 64, 64)
 NUM_CLASSES = 16
 

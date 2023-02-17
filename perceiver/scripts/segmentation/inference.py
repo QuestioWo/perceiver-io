@@ -13,18 +13,18 @@ from matplotlib.axes import Axes
 from tqdm import tqdm
 from medpy import metric
 
-from perceiver.model.segmentation.segmentation import SLABS_DEPTH, SLABS_START, LitSegmentationMapper, SLICE_INDEX_FROM, SLICE_INDEX_TO
+from perceiver.model.segmentation.segmentation import SLABS_DEPTH, SLABS_START, LitSegmentationMapper
 from perceiver.data.segmentation.common import coregister_image
 from perceiver.data.segmentation.miccai import CT_ONLY, IMAGE_SIZE, NUM_CLASSES, MICCAIDataModule, MICCAIPreprocessor, get_ct_only_dataset_files
 
-DATASET_ROOT = "amos22"
+DATASET_ROOT = "/mnt/d/amos22"
 
 BATCH_SIZE = 1
-USE_CUDA = True
+USE_CUDA = False
 COLS, ROWS = 5, 5
 
-LOAD_SPECIFIC_VERSION = 'correct_11_recusive_2_overlap_5_ce_only'
-USE_LAST_CHECKPOINT = False
+LOAD_SPECIFIC_VERSION = 'version_14'
+USE_LAST_CHECKPOINT = True
 
 GENERATE_MICCAI_TEST_RESULTS = False
 SAVE_PREDICTIONS = GENERATE_MICCAI_TEST_RESULTS or True
@@ -128,12 +128,13 @@ def load_model(ckpt_filename:Optional[str]=None) :
 		if LOAD_SPECIFIC_VERSION != None :
 			most_recent_checkpoints = os.path.join(os.path.join(base_logs, LOAD_SPECIFIC_VERSION), 'checkpoints')
 		all_ckpts = list(filter(lambda x: x.startswith("epoch"), os.listdir(most_recent_checkpoints)))
-		sorted_ckpts = sorted(all_ckpts, key=lambda x: float(x.split("val_loss=")[-1].split(".ckpt")[0]))
-		best_ckpt = sorted_ckpts[0]
-		ckpt = os.path.join(most_recent_checkpoints, best_ckpt)
+		sorted_ckpts = sorted(all_ckpts, key=lambda x: float(x.split("val_loss=")[-1].split("-val_dice")[0]))
 		
 		if USE_LAST_CHECKPOINT :
 			ckpt = os.path.join(most_recent_checkpoints, "last.ckpt")
+		else :
+			best_ckpt = sorted_ckpts[0]
+			ckpt = os.path.join(most_recent_checkpoints, best_ckpt)
 	
 	else :
 		ckpt = ckpt_filename
@@ -184,7 +185,7 @@ def load_and_preprocess_data() :
 	return (segmentation_dataset, segmentation_objects, imgs, coregistered_images, coregistered_transformations, miccai_preproc)
 
 
-def perform_inferences(imgs, model, device, batch_size) :
+def perform_inferences(imgs, model, device, batch_size=BATCH_SIZE) :
 	preds = []
 	for i in tqdm(range(len(imgs) // batch_size)) : 
 		with torch.no_grad():
@@ -206,32 +207,42 @@ def transform_and_upscale_predictions(preds, coregistered_images, coregistered_t
 	print("Upscaling predictions...")
 	upscaled_preds = []
 	prediction_sitk_imgs = []
+	masked_labels = []
 	for i, p in tqdm(enumerate(preds)) :
 		# Convert to sitk.Image to perform transformation then back to np.ndarray for visualisation
 		full_input = np.zeros(IMAGE_SIZE, dtype=np.int32)
 		full_input[SLABS_START:SLABS_START+SLABS_DEPTH,:,:] = np.einsum("w h d -> d w h", p)
 
+		mask = np.zeros(IMAGE_SIZE, dtype=np.int32)
+		mask[SLABS_START:SLABS_START+SLABS_DEPTH,:,:] = 1
+
+		mask_p = sitk.GetImageFromArray(mask)
+		mask_p.CopyInformation(coregistered_images[i][0])
+		mask_p = sitk.Resample(mask_p, segmentation_objects[i]['image'], coregistered_transformations[i].GetInverse(), sitk.sitkNearestNeighbor, 0)
+		mask_p.SetDirection(coregistered_images[i][0].GetDirection())
+		mask_p = sitk.Cast(mask_p, sitk.sitkUInt8)
+
 		p = sitk.GetImageFromArray(full_input)
-
 		p.CopyInformation(coregistered_images[i][0])
-
 		p = sitk.Resample(p, segmentation_objects[i]['image'], coregistered_transformations[i].GetInverse(), sitk.sitkNearestNeighbor, 0)
-
 		p.SetDirection(coregistered_images[i][0].GetDirection())
-
 		p = sitk.Cast(p, sitk.sitkUInt8)
 		
 		prediction_sitk_imgs.append(p)
 		
 		p = sitk.GetArrayFromImage(p)
+		mask_p = sitk.GetArrayFromImage(mask_p)
 
 		p = np.einsum("d w h -> w h d", p)
+		mask_p = np.einsum("d w h -> w h d", mask_p)
+
+		masked_label = np.einsum("d w h -> w h d", segmentation_objects[i]['label'])
+		masked_label[mask_p != 1] = 0 # set all other values to default/background to avoid their affect on the dice score
 		
 		upscaled_preds.append(p)
+		masked_labels.append(masked_label)
 
 	if save_predictions :
-		# if os.path.exists(save_predictions_dir) :
-		# 	shutil.rmtree(save_predictions_dir)
 		if not os.path.exists(save_predictions_dir) :
 			os.mkdir(save_predictions_dir)
 
@@ -240,22 +251,22 @@ def transform_and_upscale_predictions(preds, coregistered_images, coregistered_t
 			out_fname = os.path.join(save_predictions_dir, "%s.nii.gz" % (segmentation_objects[i]['filename']))
 			sitk.WriteImage(p, out_fname)
 
-	return upscaled_preds
+	return upscaled_preds, masked_labels
 
 
-def compute_prediction_diffs(upscaled_preds, segmentation_objects) :
+def compute_prediction_diffs(upscaled_preds, masked_labels) :
 	diffs = []
 	if DISPLAY_DIFFS :
 		print("Computing diffs...")
-		for i in tqdm(range(len(segmentation_objects))) :
-			gt_label = np.einsum("d w h -> w h d", segmentation_objects[i]['label'].numpy(force=True))
+		for i in tqdm(range(len(masked_labels))) :
+			gt_label = masked_labels[i]
 			diffs.append(np.ones_like(upscaled_preds[i]) * (upscaled_preds[i] != gt_label))
 		print(len(diffs))
 
 	return diffs
 
 
-def compute_and_print_metrics(segmentation_dataset, segmentation_objects, upscaled_preds) :
+def compute_and_print_metrics(segmentation_dataset, segmentation_objects, upscaled_preds, masked_labels) :
 	metrics_list = [
 		[["", ""], *[[v, v] for _,v in sorted(segmentation_dataset.get_labels().items(), key=lambda x: int(x[0]))[1:]]]
 	]
@@ -264,8 +275,7 @@ def compute_and_print_metrics(segmentation_dataset, segmentation_objects, upscal
 		fname = segmentation_objects[i]['filename']
 		metrics_list.append([[fname, fname]])
 		for j in range(1, NUM_CLASSES) :
-			curr_gt_label = segmentation_objects[i]['label'].numpy(force=True)
-			curr_gt_label = np.einsum("d w h -> w h d", curr_gt_label)
+			curr_gt_label = masked_labels[i]
 			curr_gt_label = np.ones_like(curr_gt_label) * (curr_gt_label == j)
 			
 			curr_slab_start = 0
@@ -320,7 +330,7 @@ def main() :
 
 	segmentation_dataset, segmentation_objects, imgs, coregistered_images, coregistered_transformations, miccai_preproc =  load_and_preprocess_data()
 
-	copy_of_imgs = [torch.clone(i[:,:,SLICE_INDEX_FROM:SLICE_INDEX_TO]) for i in imgs]
+	copy_of_imgs = [torch.clone(i[:,:,SLABS_START:SLABS_START+SLABS_DEPTH]) for i in imgs]
 
 	# Perform inference and get predictions
 	print("Performing inferences...")
@@ -333,16 +343,16 @@ def main() :
 		print("Average inference time := %s" %(str((end - start) / len(imgs))))
 
 	# Transform and scale labels back to original size
-	upscaled_preds = transform_and_upscale_predictions(preds, coregistered_images, coregistered_transformations, segmentation_objects)
+	upscaled_preds, masked_labels = transform_and_upscale_predictions(preds, coregistered_images, coregistered_transformations, segmentation_objects)
 
 	fig, axes = plt.subplots(ROWS, COLS)
 	axes = axes.flatten()
 
 	# non-vectorised but for weird shapes
-	diffs = compute_prediction_diffs(upscaled_preds, segmentation_objects)
+	diffs = compute_prediction_diffs(upscaled_preds, masked_labels)
 
 	if COMPUTE_METRICS :
-		compute_and_print_metrics(segmentation_dataset, segmentation_objects, upscaled_preds)
+		compute_and_print_metrics(segmentation_dataset, segmentation_objects, upscaled_preds, masked_labels)
 
 	print("Preprocessing raw images...")
 	imgs_raw = []

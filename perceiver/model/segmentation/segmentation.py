@@ -6,7 +6,6 @@ from typing import Any, Optional, Tuple
 import torch.nn as nn
 import torchmetrics as tm
 import torch
-import pytorch_lightning.utilities.memory as mem_utils
 import torch.utils.checkpoint
 
 from einops import rearrange
@@ -32,11 +31,12 @@ from perceiver.model.core.modules import OutputAdapter
 
 SLABS_SIZE = 5
 
-# SLABS_START = 30
-# SLABS_DEPTH = 10
+SLABS_START = 60
+SLABS_DEPTH = 20
 
-SLABS_START = 0
-SLABS_DEPTH = IMAGE_SIZE[0]
+# SLABS_START = 0
+# SLABS_DEPTH = IMAGE_SIZE[0]
+
 SLABS_OVERLAP = 2
 SLABS_RECURSION_OVERLAP = 2
 
@@ -109,8 +109,6 @@ class LitMapper(LitModel):
 	def step(self, batch):
 		logits, y = self(batch)
 
-		y = y[:,:,:,SLABS_START:SLABS_START+SLABS_DEPTH]
-		
 		ce_loss = self.ce_loss(logits, y.long())
 		# dice_loss = self.dice_loss(logits, y.long(), softmax=True)
 		# loss = 0.4 * ce_loss + 0.6 * dice_loss
@@ -258,8 +256,9 @@ class LitSegmentationMapper(LitMapper):
 
 			slab_overlap_const = SLABS_OVERLAP*i
 
-			start_location = (SLABS_START+offset-slab_overlap_const)
-			end_location = SLABS_START+(SLABS_SIZE+offset-slab_overlap_const)
+			# No need to add slab start as full_results will always be slabs_depth sized 
+			start_location = (offset-slab_overlap_const)
+			end_location = (SLABS_SIZE+offset-slab_overlap_const)
 
 			# print("start :=", start_location)
 			# print("end :=", end_location)
@@ -284,4 +283,8 @@ class LitSegmentationMapper(LitMapper):
 			full_results[:,:,:,:,start_location:end_location] += logits
 			prev_recursion_predictions[:,:,:,:] = torch.argmax(logits[:,:,:,:,-SLABS_RECURSION_OVERLAP:], dim=1)
 
-		return full_results, batch["label"]
+		y = batch["label"] 
+		if y != None :
+			y = y[:,:,:,SLABS_START:SLABS_START+SLABS_DEPTH]
+
+		return full_results, y
