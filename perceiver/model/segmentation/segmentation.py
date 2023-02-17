@@ -29,7 +29,7 @@ from perceiver.model.core.modules import OutputAdapter
 # SLICE_INDEX_FROM, SLICE_INDEX_TO = (37, 38) # For 110,128,128 NOTE: can run
 # SLICE_INDEX_FROM, SLICE_INDEX_TO = (37, 42) # For 110,128,128 NOTE: can run
 
-SLABS_SIZE = 5
+SLABS_SIZE = 4
 
 SLABS_START = 60
 SLABS_DEPTH = 20
@@ -38,7 +38,7 @@ SLABS_DEPTH = 20
 # SLABS_DEPTH = IMAGE_SIZE[0]
 
 SLABS_OVERLAP = 2
-SLABS_RECURSION_OVERLAP = 2
+SLABS_RECURSION_OVERLAP = 1
 
 assert int(SLABS_DEPTH / SLABS_OVERLAP) == (SLABS_DEPTH / SLABS_OVERLAP), "depth of scan must be divisible by slab overlap"
 assert int(SLABS_DEPTH / SLABS_SIZE) == (SLABS_DEPTH / SLABS_SIZE), "depth of scan must be divisible by slab size"
