@@ -13,7 +13,7 @@ from matplotlib.axes import Axes
 from tqdm import tqdm
 from medpy import metric
 
-from perceiver.model.segmentation.segmentation import SLABS_DEPTH, SLABS_START, LitSegmentationMapper
+from perceiver.model.segmentation.segmentation import LitSegmentationMapper
 from perceiver.data.segmentation.common import coregister_image
 from perceiver.data.segmentation.miccai import CT_ONLY, IMAGE_SIZE, NUM_CLASSES, MICCAIDataModule, MICCAIPreprocessor, get_ct_only_dataset_files
 
@@ -203,7 +203,7 @@ def perform_inferences(imgs, model, device, batch_size=BATCH_SIZE) :
 	return preds
 
 
-def transform_and_upscale_predictions(preds, coregistered_images, coregistered_transformations, segmentation_objects, save_predictions:bool=SAVE_PREDICTIONS, save_predictions_dir:str=SAVE_PREDICTIONS_DIR) :
+def transform_and_upscale_predictions(model: LitSegmentationMapper, preds, coregistered_images, coregistered_transformations, segmentation_objects, save_predictions:bool=SAVE_PREDICTIONS, save_predictions_dir:str=SAVE_PREDICTIONS_DIR) :
 	print("Upscaling predictions...")
 	upscaled_preds = []
 	prediction_sitk_imgs = []
@@ -211,10 +211,10 @@ def transform_and_upscale_predictions(preds, coregistered_images, coregistered_t
 	for i, p in tqdm(enumerate(preds)) :
 		# Convert to sitk.Image to perform transformation then back to np.ndarray for visualisation
 		full_input = np.zeros(IMAGE_SIZE, dtype=np.int32)
-		full_input[SLABS_START:SLABS_START+SLABS_DEPTH,:,:] = np.einsum("w h d -> d w h", p)
+		full_input[model.slabs_start:model.slabs_start+model.slabs_depth,:,:] = np.einsum("w h d -> d w h", p)
 
 		mask = np.zeros(IMAGE_SIZE, dtype=np.int32)
-		mask[SLABS_START:SLABS_START+SLABS_DEPTH,:,:] = 1
+		mask[model.slabs_start:model.slabs_start+model.slabs_depth,:,:] = 1
 
 		mask_p = sitk.GetImageFromArray(mask)
 		mask_p.CopyInformation(coregistered_images[i][0])
@@ -335,7 +335,7 @@ def main() :
 
 	segmentation_dataset, segmentation_objects, imgs, coregistered_images, coregistered_transformations, miccai_preproc =  load_and_preprocess_data()
 
-	copy_of_imgs = [torch.clone(i[:,:,SLABS_START:SLABS_START+SLABS_DEPTH]) for i in imgs]
+	copy_of_imgs = [torch.clone(i[:,:,model.slabs_start:model.slabs_start+model.slabs_depth]) for i in imgs]
 
 	# Perform inference and get predictions
 	print("Performing inferences...")
@@ -348,7 +348,7 @@ def main() :
 		print("Average inference time := %s" %(str((end - start) / len(imgs))))
 
 	# Transform and scale labels back to original size
-	upscaled_preds, masked_labels = transform_and_upscale_predictions(preds, coregistered_images, coregistered_transformations, segmentation_objects)
+	upscaled_preds, masked_labels = transform_and_upscale_predictions(model, preds, coregistered_images, coregistered_transformations, segmentation_objects)
 
 	fig, axes = plt.subplots(ROWS, COLS)
 	axes = axes.flatten()

@@ -78,7 +78,7 @@ def main() :
 	print("Average inference time := %s" %(str((end - start) / len(imgs))))
 
 	# Transform and scale labels back to original size
-	transform_and_upscale_predictions(preds, coregistered_images, coregistered_transformations, segmentation_objects, SAVE_PREDICTIONS, SAVE_PREDICTIONS_DIR)
+	transform_and_upscale_predictions(model, preds, coregistered_images, coregistered_transformations, segmentation_objects, SAVE_PREDICTIONS, SAVE_PREDICTIONS_DIR)
 
 
 if __name__ == "__main__" :
