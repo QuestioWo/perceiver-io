@@ -171,9 +171,15 @@ if __name__ == "__main__":
 		print(current_args)
 		print("!!!!!!!!!!!!!!!!!!!!!! Beginning training !!!!!!!!!!!!!!!!!!!!!!")
 
-		SegmentationMapperCLI(LitSegmentationMapper, default_parameters=current_args, description="Segmentation map generator", run=True)
+		loss = 1.0
 
-		loss = find_loss(i)
+		try:
+			SegmentationMapperCLI(LitSegmentationMapper, default_parameters=current_args, description="Segmentation map generator", run=True)
+
+			loss = find_loss(i)
+		except Exception :
+			print("!!!!!!!!!!!!!!!!!!! Errored during training !!!!!!!!!!!!!!!!!!!!")
+			loss = 1.0
 
 		print("!!!!!!!!!!!!! %dth loss (1-mean_dsc) := %.4f !!!!!!!!!!!!!" % (i, loss))
 
