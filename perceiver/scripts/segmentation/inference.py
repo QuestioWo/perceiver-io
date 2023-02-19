@@ -24,7 +24,7 @@ USE_CUDA = False
 COLS, ROWS = 5, 5
 
 LOAD_SPECIFIC_VERSION = 'version_14'
-USE_LAST_CHECKPOINT = True
+USE_LAST_CHECKPOINT = False
 
 GENERATE_MICCAI_TEST_RESULTS = False
 SAVE_PREDICTIONS = GENERATE_MICCAI_TEST_RESULTS or True
@@ -120,17 +120,17 @@ def calculate_metrics(pred: np.ndarray, gt: np.ndarray) -> Tuple[float, float]:
         return 0, 0
 
 
-def load_model(ckpt_filename:Optional[str]=None) :
+def load_model(ckpt_filename:str=None, load_last_ckpt:bool=USE_LAST_CHECKPOINT, specific_version:str=LOAD_SPECIFIC_VERSION) :
 	if ckpt_filename == None :
 		base_logs = os.path.join('logs', 'miccai_seg')
 		most_recent_version = os.path.join(base_logs, sorted(os.listdir(base_logs), key=natural_keys)[-1])
 		most_recent_checkpoints = os.path.join(most_recent_version, 'checkpoints')
-		if LOAD_SPECIFIC_VERSION != None :
-			most_recent_checkpoints = os.path.join(os.path.join(base_logs, LOAD_SPECIFIC_VERSION), 'checkpoints')
+		if specific_version != None :
+			most_recent_checkpoints = os.path.join(os.path.join(base_logs, specific_version), 'checkpoints')
 		all_ckpts = list(filter(lambda x: x.startswith("epoch"), os.listdir(most_recent_checkpoints)))
-		sorted_ckpts = sorted(all_ckpts, key=lambda x: float(x.split("val_loss=")[-1].split("-val_dice")[0]))
+		sorted_ckpts = sorted(all_ckpts, key=lambda x: float(x.split("val_dice=")[-1].split(".ckpt")[0]), reverse=True)
 		
-		if USE_LAST_CHECKPOINT :
+		if load_last_ckpt :
 			ckpt = os.path.join(most_recent_checkpoints, "last.ckpt")
 		else :
 			best_ckpt = sorted_ckpts[0]
@@ -147,14 +147,14 @@ def load_model(ckpt_filename:Optional[str]=None) :
 	return model
 
 
-def load_and_preprocess_data() :
+def load_and_preprocess_data(generate_test_results:bool=GENERATE_MICCAI_TEST_RESULTS, coregister_loaded_images:bool=COREGISTER_IMAGES) :
 	data_module = MICCAIDataModule(root=DATASET_ROOT, load_raw_instead=True)
 	print("Loading and preprocessing validation dataset...")
 	segmentation_dataset = data_module.load_dataset()
 	miccai_preproc = MICCAIPreprocessor()
 
 	segmentation_objects = []
-	if GENERATE_MICCAI_TEST_RESULTS :
+	if generate_test_results :
 		file_list = segmentation_dataset.metadata['test']
 		if CT_ONLY :
 			file_list = [f['image'] for f in get_ct_only_dataset_files(file_list)]
@@ -167,7 +167,7 @@ def load_and_preprocess_data() :
 		segmentation_dataset = data_module.load_dataset("val")
 		segmentation_objects = [segmentation_dataset[-i] for i in range(COLS * ROWS)]
 
-	if COREGISTER_IMAGES :
+	if coregister_loaded_images :
 		print("Coregistering scans for inference...")
 		coregistered_images = [coregister_image(sitk.Cast(segmentation_objects[i]['image'], sitk.sitkFloat64), segmentation_dataset.get_coregistration_image()) for i in tqdm(range(len(segmentation_objects)))]
 	else :
@@ -312,7 +312,12 @@ def compute_and_print_metrics(segmentation_dataset, segmentation_objects, upscal
 			total_hd += s[1]
 	total_values = (len(metrics_list) * len(metrics_list[0]))
 
-	print("Mean DSC := %.3f, Mean HD95 := %.3f" % ((total_dice / total_values), (total_hd / total_values)))
+	mean_dsc = (total_dice / total_values)
+	mean_hd95 = (total_hd / total_values)
+
+	print("Mean DSC := %.3f, Mean HD95 := %.3f" % (mean_dsc, mean_hd95))
+
+	return mean_dsc
 
 
 def main() :
@@ -348,7 +353,6 @@ def main() :
 	fig, axes = plt.subplots(ROWS, COLS)
 	axes = axes.flatten()
 
-	# non-vectorised but for weird shapes
 	diffs = compute_prediction_diffs(upscaled_preds, masked_labels)
 
 	if COMPUTE_METRICS :
