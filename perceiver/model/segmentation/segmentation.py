@@ -200,13 +200,13 @@ class ScanSegmenter(PerceiverIO):
 class LitSegmentationMapper(LitMapper):
 	def __init__(self, encoder: SegmentationEncoderConfig, decoder: SegmentationDecoderConfig, *args: Any, **kwargs: Any):
 		super().__init__(encoder, decoder, *args, **kwargs)
-		self.recursive_slices = self.hparams.recursive_slices # 1
-		self.overlap_slices = self.hparams.overlap_slices # 2
+		self.recursive_slices = self.hparams.recursive_slices
+		self.overlap_slices = self.hparams.overlap_slices
 
-		self.slabs_size = self.hparams.slabs_size # 4
+		self.slabs_size = self.hparams.slabs_size
 
-		self.slabs_start = self.hparams.slabs_start # 80
-		self.slabs_depth = self.hparams.slabs_depth # 20
+		self.slabs_start = self.hparams.slabs_start
+		self.slabs_depth = self.hparams.slabs_depth
 
 		encoder.image_shape = (IMAGE_SIZE[1], IMAGE_SIZE[2], self.slabs_size+self.recursive_slices)
 		decoder.num_output_queries = (IMAGE_SIZE[1] * IMAGE_SIZE[2] * self.slabs_size)
