@@ -23,6 +23,9 @@ class SegmentationMapperCLI(DefaultWrapperCLI):
 
 
 if __name__ == "__main__":
+
+
+
 	current_default_parameters = {
 		"model.num_latents": 512,
 		"model.num_latent_channels": 128,
