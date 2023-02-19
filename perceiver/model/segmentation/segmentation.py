@@ -31,7 +31,7 @@ from perceiver.model.core.modules import OutputAdapter
 
 SLABS_SIZE = 4
 
-SLABS_START = 60
+SLABS_START = 80
 SLABS_DEPTH = 20
 
 # SLABS_START = 0
