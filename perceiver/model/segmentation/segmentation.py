@@ -24,39 +24,14 @@ from perceiver.model.image.common import FourierPositionEncoding
 from perceiver.data.segmentation.miccai import IMAGE_SIZE, NUM_CLASSES
 from perceiver.model.core.modules import OutputAdapter
 
-# SLICE_INDEX_FROM, SLICE_INDEX_TO = (64, 124) # For 220,256,256 NOTE: cannot run
-# SLICE_INDEX_FROM, SLICE_INDEX_TO = (48, 52) # For 165,192,192 NOTE: cannot run
-# SLICE_INDEX_FROM, SLICE_INDEX_TO = (37, 38) # For 110,128,128 NOTE: can run
-# SLICE_INDEX_FROM, SLICE_INDEX_TO = (37, 42) # For 110,128,128 NOTE: can run
-
-SLABS_SIZE = 4
-
-SLABS_START = 80
-SLABS_DEPTH = 20
-
-# SLABS_START = 0
-# SLABS_DEPTH = IMAGE_SIZE[0]
-
-SLABS_OVERLAP = 2
-SLABS_RECURSION_OVERLAP = 1
-
-assert int(SLABS_DEPTH / SLABS_OVERLAP) == (SLABS_DEPTH / SLABS_OVERLAP), "depth of scan must be divisible by slab overlap"
-assert int(SLABS_DEPTH / SLABS_SIZE) == (SLABS_DEPTH / SLABS_SIZE), "depth of scan must be divisible by slab size"
-
-# -1 as first slab is double the height due to having nothing to overlap with
-# the second part of the last slab will have no overlap on the bottom half
-SLABS_ITERATIONS = (SLABS_DEPTH // (SLABS_SIZE - SLABS_OVERLAP)) - (1 if (SLABS_SIZE // 2 == SLABS_OVERLAP) else 0)
-
 @dataclass
 class SegmentationDecoderConfig(DecoderConfig):
-	num_output_queries: int = (IMAGE_SIZE[1] * IMAGE_SIZE[2] * SLABS_SIZE)
 	num_output_query_channels: int = None
 	num_classes: int = NUM_CLASSES
 
 
 @dataclass
 class SegmentationEncoderConfig(EncoderConfig):
-	image_shape: Tuple[int, int, int] = (IMAGE_SIZE[1], IMAGE_SIZE[2], SLABS_SIZE+SLABS_RECURSION_OVERLAP)
 	num_frequency_bands: int = 16
 
 class DiceLoss(nn.Module):
@@ -220,15 +195,22 @@ class ScanSegmenter(PerceiverIO):
 			self.load_state_dict(torch.load(config.params))
 		else:
 			raise ValueError("Cannot find pretrained model")
-		#     # import model params from Hugging Face Perceiver
-		#     model = PerceiverForImageClassificationFourier.from_pretrained(config.params)
-		#     copy_encoder_params(model, self.encoder)
-		#     copy_decoder_params(model, self.decoder)
 
 
 class LitSegmentationMapper(LitMapper):
 	def __init__(self, encoder: SegmentationEncoderConfig, decoder: SegmentationDecoderConfig, *args: Any, **kwargs: Any):
 		super().__init__(encoder, decoder, *args, **kwargs)
+		self.recursive_slices = self.hparams.recursive_slices # 1
+		self.overlap_slices = self.hparams.overlap_slices # 2
+
+		self.slabs_size = self.hparams.slabs_size # 4
+
+		self.slabs_start = self.hparams.slabs_start # 80
+		self.slabs_depth = self.hparams.slabs_depth # 20
+
+		encoder.image_shape = (IMAGE_SIZE[1], IMAGE_SIZE[2], self.slabs_size+self.recursive_slices)
+		decoder.num_output_queries = (IMAGE_SIZE[1] * IMAGE_SIZE[2] * self.slabs_size)
+
 		self.model = ScanSegmenter(
 			PerceiverConfig(
 				encoder=encoder,
@@ -241,6 +223,13 @@ class LitSegmentationMapper(LitMapper):
 			)
 		)
 
+		assert int(self.slabs_depth / self.overlap_slices) == (self.slabs_depth / self.overlap_slices), "depth of scan must be divisible by slab overlap"
+		assert int(self.slabs_depth / self.slabs_size) == (self.slabs_depth / self.slabs_size), "depth of scan must be divisible by slab size"
+
+		# -1 as first slab is double the height due to having nothing to overlap with
+		# the second part of the last slab will have no overlap on the bottom half
+		self.slab_iterations = (self.slabs_depth // (self.slabs_size - self.overlap_slices)) - (1 if (self.slabs_size // 2 == self.overlap_slices) else 0)
+
 	def forward(self, batch):
 		x: torch.Tensor = batch["image"]
 
@@ -248,25 +237,25 @@ class LitSegmentationMapper(LitMapper):
 
 		b, *_ = x.shape
 		
-		full_results: torch.Tensor = torch.zeros((b, NUM_CLASSES, IMAGE_SIZE[1], IMAGE_SIZE[2], SLABS_DEPTH), device=x.device)
-		prev_recursion_predictions: torch.Tensor = torch.zeros((b, IMAGE_SIZE[1], IMAGE_SIZE[2], SLABS_RECURSION_OVERLAP), device=x.device, dtype=x.dtype)
+		full_results: torch.Tensor = torch.zeros((b, NUM_CLASSES, IMAGE_SIZE[1], IMAGE_SIZE[2], self.slabs_depth), device=x.device)
+		prev_recursion_predictions: torch.Tensor = torch.zeros((b, IMAGE_SIZE[1], IMAGE_SIZE[2], self.recursive_slices), device=x.device, dtype=x.dtype)
 
-		for i in range(SLABS_ITERATIONS) :
-			offset = i * SLABS_SIZE
+		for i in range(self.slab_iterations) :
+			offset = i * self.slabs_size
 
-			slab_overlap_const = SLABS_OVERLAP*i
+			slab_overlap_const = self.overlap_slices*i
 
 			# No need to add slab start as full_results will always be slabs_depth sized 
 			start_location = (offset-slab_overlap_const)
-			end_location = (SLABS_SIZE+offset-slab_overlap_const)
+			end_location = (self.slabs_size+offset-slab_overlap_const)
 
 			# print("start :=", start_location)
 			# print("end :=", end_location)
 
-			current_inputs: torch.Tensor = torch.zeros((b, IMAGE_SIZE[1], IMAGE_SIZE[2], SLABS_SIZE+SLABS_RECURSION_OVERLAP), device=x.device)
+			current_inputs: torch.Tensor = torch.zeros((b, IMAGE_SIZE[1], IMAGE_SIZE[2], self.slabs_size+self.recursive_slices), device=x.device)
 			
-			current_inputs[:,:,:,:SLABS_RECURSION_OVERLAP] = prev_recursion_predictions
-			current_inputs[:,:,:,SLABS_RECURSION_OVERLAP:(SLABS_SIZE+SLABS_RECURSION_OVERLAP)] = x[:,:,:,start_location:end_location]
+			current_inputs[:,:,:,:self.recursive_slices] = prev_recursion_predictions
+			current_inputs[:,:,:,self.recursive_slices:(self.slabs_size+self.recursive_slices)] = x[:,:,:,start_location:end_location]
 
 			logits: torch.Tensor = None
 			if current_inputs.requires_grad :
@@ -274,17 +263,17 @@ class LitSegmentationMapper(LitMapper):
 			else :
 				logits = self.model(current_inputs)
 
-			logits = torch.reshape(logits, [b, *x.shape[1:-1], SLABS_SIZE, NUM_CLASSES])
+			logits = torch.reshape(logits, [b, *x.shape[1:-1], self.slabs_size, NUM_CLASSES])
 			logits = torch.einsum("b w h d c -> b c w h d", logits)
 
 			# always just add logits as otherwise previous logits will be overwritten.
 			# addition means that no averaging has to take place and the maxes/predictions
 			# will be correct and efficient
 			full_results[:,:,:,:,start_location:end_location] += logits
-			prev_recursion_predictions[:,:,:,:] = torch.argmax(logits[:,:,:,:,-SLABS_RECURSION_OVERLAP:], dim=1)
+			prev_recursion_predictions[:,:,:,:] = torch.argmax(logits[:,:,:,:,-self.recursive_slices:], dim=1)
 
 		y = batch["label"] 
 		if y != None :
-			y = y[:,:,:,SLABS_START:SLABS_START+SLABS_DEPTH]
+			y = y[:,:,:,self.slabs_start:self.slabs_start+self.slabs_depth]
 
 		return full_results, y
