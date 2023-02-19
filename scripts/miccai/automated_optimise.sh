@@ -1,4 +1,4 @@
-python -m perceiver.scripts.segmentation.mapper fit \
+python -m perceiver.scripts.segmentation.automated_mapper fit \
   --optimizer=AdamW \
   --optimizer.lr=5e-4 \
   --trainer.max_epochs=400 \
