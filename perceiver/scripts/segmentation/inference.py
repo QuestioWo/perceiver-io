@@ -23,7 +23,7 @@ BATCH_SIZE = 1
 USE_CUDA = False
 COLS, ROWS = 5, 5
 
-LOAD_SPECIFIC_VERSION = 'version_14'
+LOAD_SPECIFIC_VERSION = 'version_0'
 USE_LAST_CHECKPOINT = False
 
 GENERATE_MICCAI_TEST_RESULTS = False
@@ -169,12 +169,12 @@ def load_and_preprocess_data(generate_test_results:bool=GENERATE_MICCAI_TEST_RES
 
 	if coregister_loaded_images :
 		print("Coregistering scans for inference...")
-		coregistered_images = [coregister_image(sitk.Cast(segmentation_objects[i]['image'], sitk.sitkFloat64), segmentation_dataset.get_coregistration_image()) for i in tqdm(range(len(segmentation_objects)))]
+		coregistered_images = [coregister_image(sitk.Cast(segmentation_objects[i]['image'], sitk.sitkFloat32), segmentation_dataset.get_coregistration_image()) for i in tqdm(range(len(segmentation_objects)))]
 	else :
 		print("Loading precoregistered scans for inference...")
 		# segmentation_objects = [{"image" : None, "label" : obj['label'], "filename": obj['filename']} for obj in segmentation_objects]
 		_accompanying_transformations = [sitk.ReadTransform(os.path.join(DATASET_ROOT, "imagesVa_preprocessed", f['filename'].replace(".nii.gz", "_transformation.tfm"))) for f in segmentation_objects]
-		_coregistered_images_only = [sitk.ReadImage(os.path.join(DATASET_ROOT, "imagesVa_preprocessed", f['filename']), sitk.sitkFloat64) for f in tqdm(segmentation_objects)]
+		_coregistered_images_only = [sitk.ReadImage(os.path.join(DATASET_ROOT, "imagesVa_preprocessed", f['filename']), sitk.sitkFloat32) for f in tqdm(segmentation_objects)]
 		coregistered_images = list(zip(_coregistered_images_only, _accompanying_transformations))
 
 	coregistered_transformations = [obj[1] for obj in coregistered_images]

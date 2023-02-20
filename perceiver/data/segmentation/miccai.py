@@ -25,7 +25,7 @@ NUM_CLASSES = 16
 
 COREGISTRATION_IMAGE_FILENAME = "coregistration_image" # + ".nii.gz"
 
-SKIP_PREPROCESSED_CHECK = False
+SKIP_PREPROCESSED_CHECK = True
 
 CT_ONLY = True
 
@@ -100,7 +100,7 @@ class MICCAILoader() :
 			print("Cannot find %s inside dataset" % self.IMAGES_TR)
 			sys.exit(1)
 		if not os.path.exists(self.images_validation_dir) :
-			print("Cannot find %s inside dataset", self.IMAGES_VA)
+			print("Cannot find %s inside dataset" % self.IMAGES_VA)
 			sys.exit(1)
 
 		self.labels_training_dir = os.path.join(self.root, self.LABELS_TR)
@@ -108,10 +108,10 @@ class MICCAILoader() :
 		self.labels_training_preprocessed_dir = os.path.join(self.root, self.LABELS_TR_PREPROCESSED)
 		self.labels_validation_preprocessed_dir = os.path.join(self.root, self.LABELS_VA_PREPROCESSED)
 		if not os.path.exists(self.labels_training_dir) :
-			print("Cannot find %s inside dataset", self.LABELS_TR)
+			print("Cannot find %s inside dataset" % self.LABELS_TR)
 			sys.exit(1)
 		if not os.path.exists(self.labels_validation_dir) :
-			print("Cannot find %s inside dataset", self.LABELS_VA)
+			print("Cannot find %s inside dataset" % self.LABELS_VA)
 			sys.exit(1)
 		
 		self.metadata = {}
@@ -225,7 +225,7 @@ class MICCAILoader() :
 				image_object['filename'] = fname
 				
 				if load_raw_instead :
-					itk_img = sitk.ReadImage(os.path.join(images_dir, image_object['filename']), sitk.sitkFloat64)
+					itk_img = sitk.ReadImage(os.path.join(images_dir, image_object['filename']), sitk.sitkFloat32)
 					itk_img = sitk.DICOMOrient(itk_img, "RPI")
 					# cast array as torch cannot convert arrays of dtype=np.uint16 and transformations require floating point data
 					# img = torch.from_numpy(sitk.GetArrayFromImage(itk_img))
@@ -237,7 +237,7 @@ class MICCAILoader() :
 					image_object['label'] = img_seg
 				
 				else :
-					itk_img = sitk.ReadImage(os.path.join(images_preprocessed_dir, image_object['filename']), sitk.sitkFloat64)
+					itk_img = sitk.ReadImage(os.path.join(images_preprocessed_dir, image_object['filename']), sitk.sitkFloat32)
 					itk_img = sitk.DICOMOrient(itk_img, "RPI")
 					# cast array as torch cannot convert arrays of dtype=np.uint16 and transformations require floating point data
 					img = torch.from_numpy(sitk.GetArrayFromImage(itk_img))
