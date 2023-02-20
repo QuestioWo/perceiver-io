@@ -1,6 +1,7 @@
 import nevergrad as ng
 import torch
 import traceback
+import gc
 
 from perceiver.scripts.segmentation.mapper import SegmentationMapperCLI
 from perceiver.model.segmentation.segmentation import LitSegmentationMapper
@@ -122,22 +123,22 @@ if __name__ == "__main__":
 	)
 
 	num_latents = ng.p.Scalar(lower=4, upper=2048).set_integer_casting()
-	num_latent_channels = ng.p.Scalar(lower=1, upper=4096).set_integer_casting()
+	num_latent_channels = ng.p.Scalar(lower=1, upper=1024).set_integer_casting()
 	
 	overlap_slices = ng.p.Scalar(lower=0, upper=4).set_integer_casting()
 	recursive_slices = ng.p.Scalar(lower=0, upper=4).set_integer_casting()
 	
-	encoder_num_frequency_bands = ng.p.Scalar(lower=1, upper=512).set_integer_casting()
+	encoder_num_frequency_bands = ng.p.Scalar(lower=1, upper=128).set_integer_casting()
 
-	encoder_num_cross_attention_layers = ng.p.Scalar(lower=1, upper=32).set_integer_casting()
-	encoder_num_cross_attention_heads = ng.p.Scalar(lower=1, upper=32).set_integer_casting()
+	encoder_num_cross_attention_layers = ng.p.Scalar(lower=1, upper=4).set_integer_casting()
+	encoder_num_cross_attention_heads = ng.p.Scalar(lower=1, upper=4).set_integer_casting()
 
-	encoder_num_self_attention_blocks = ng.p.Scalar(lower=1, upper=32).set_integer_casting()
-	encoder_num_self_attention_layers_per_block = ng.p.Scalar(lower=1, upper=32).set_integer_casting()
+	encoder_num_self_attention_blocks = ng.p.Scalar(lower=1, upper=4).set_integer_casting()
+	encoder_num_self_attention_layers_per_block = ng.p.Scalar(lower=1, upper=4).set_integer_casting()
 
-	encoder_num_self_attention_heads = ng.p.Scalar(lower=1, upper=32).set_integer_casting()
+	encoder_num_self_attention_heads = ng.p.Scalar(lower=1, upper=4).set_integer_casting()
 
-	decoder_num_cross_attention_heads = ng.p.Scalar(lower=1, upper=32).set_integer_casting()
+	decoder_num_cross_attention_heads = ng.p.Scalar(lower=1, upper=4).set_integer_casting()
 
 	instru = ng.p.Instrumentation(ng.p.Tuple(
 		num_latents,
@@ -177,11 +178,15 @@ if __name__ == "__main__":
 		try:
 			SegmentationMapperCLI(LitSegmentationMapper, default_parameters=current_args, description="Segmentation map generator", run=True)
 
+			gc.collect()
+
 			loss = find_loss(i)
 		except Exception :
 			print("!!!!!!!!!!!!!!!!!!! Errored during training !!!!!!!!!!!!!!!!!!!!")
 			traceback.print_exc()
 			loss = 1.0
+
+		gc.collect()
 
 		print("!!!!!!!!!!!!! %dth loss (1-mean_dsc) := %.4f !!!!!!!!!!!!!" % (i, loss))
 
