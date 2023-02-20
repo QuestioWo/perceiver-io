@@ -1,7 +1,7 @@
 mkdir -p logs/miccai_seg && python -m perceiver.scripts.segmentation.automated_mapper fit \
   --optimizer=AdamW \
   --optimizer.lr=5e-4 \
-  --trainer.max_epochs=2 \
+  --trainer.max_epochs=1 \
   --trainer.logger=TensorBoardLogger \
   --trainer.logger.save_dir=logs \
   --trainer.logger.name=miccai_seg \

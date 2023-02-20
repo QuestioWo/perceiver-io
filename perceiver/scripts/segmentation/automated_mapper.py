@@ -1,5 +1,6 @@
 import nevergrad as ng
 import torch
+import traceback
 
 from perceiver.scripts.segmentation.mapper import SegmentationMapperCLI
 from perceiver.model.segmentation.segmentation import LitSegmentationMapper
@@ -13,7 +14,7 @@ SLABS_START = 80
 SLABS_DEPTH = 20
 SLABS_SIZE = 4
 
-OPTIMISATION_BUDGET = 2
+OPTIMISATION_BUDGET = 5
 
 ALL_MODEL_PARAMERTERS = [
 	# NOTE: Omitted/set values:
@@ -77,7 +78,7 @@ def retreive_default_parameters(parameter_candidate) :
 
 
 def find_loss(index:int) :
-	model = load_model()
+	model = load_model(specific_version="version_"+str(index))
 
 	cuda = torch.cuda.is_available() and USE_CUDA_FOR_LOSS_INFERENCES
 	dev = "cpu"
@@ -93,7 +94,7 @@ def find_loss(index:int) :
 
 	preds = perform_inferences(imgs, model, dev)
 	
-	upscaled_preds, masked_labels = transform_and_upscale_predictions(model, preds, coregistered_images, coregistered_transformations, segmentation_objects, save_predictions_dir="results_" + index)
+	upscaled_preds, masked_labels = transform_and_upscale_predictions(model, preds, coregistered_images, coregistered_transformations, segmentation_objects, save_predictions_dir="results_" + str(index))
 	
 	mean_dsc = compute_and_print_metrics(segmentation_dataset, segmentation_objects, upscaled_preds, masked_labels)
 
@@ -179,6 +180,7 @@ if __name__ == "__main__":
 			loss = find_loss(i)
 		except Exception :
 			print("!!!!!!!!!!!!!!!!!!! Errored during training !!!!!!!!!!!!!!!!!!!!")
+			traceback.print_exc()
 			loss = 1.0
 
 		print("!!!!!!!!!!!!! %dth loss (1-mean_dsc) := %.4f !!!!!!!!!!!!!" % (i, loss))
