@@ -7,7 +7,7 @@ from perceiver.scripts.segmentation.mapper import SegmentationMapperCLI
 from perceiver.model.segmentation.segmentation import LitSegmentationMapper
 from perceiver.scripts.segmentation.inference import compute_and_print_metrics, load_and_preprocess_data, load_model, perform_inferences, transform_and_upscale_predictions
 
-USE_CUDA_FOR_LOSS_INFERENCES = False
+USE_CUDA_FOR_LOSS_INFERENCES = True
 
 ENCODER_DROPOUT = 0.3
 DECODER_DROPOUT = 0.3
@@ -15,7 +15,7 @@ SLABS_START = 80
 SLABS_DEPTH = 20
 SLABS_SIZE = 4
 
-OPTIMISATION_BUDGET = 5
+OPTIMISATION_BUDGET = 50
 
 ALL_MODEL_PARAMERTERS = [
 	# NOTE: Omitted/set values:
@@ -79,7 +79,7 @@ def retreive_default_parameters(parameter_candidate) :
 
 
 def find_loss(index:int) :
-	model = load_model(specific_version="version_"+str(index))
+	model = load_model(specific_version=None) # load most recent version
 
 	cuda = torch.cuda.is_available() and USE_CUDA_FOR_LOSS_INFERENCES
 	dev = "cpu"
@@ -91,7 +91,7 @@ def find_loss(index:int) :
 
 	model.to(device=dev)
 
-	segmentation_dataset, segmentation_objects, imgs, coregistered_images, coregistered_transformations, _ =  load_and_preprocess_data()
+	segmentation_dataset, segmentation_objects, imgs, coregistered_images, coregistered_transformations, _ =  load_and_preprocess_data(dataset='test')
 
 	preds = perform_inferences(imgs, model, dev)
 	
