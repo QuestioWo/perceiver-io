@@ -223,7 +223,8 @@ class LitSegmentationMapper(LitMapper):
 			)
 		)
 
-		assert int(self.slabs_depth / self.overlap_slices) == (self.slabs_depth / self.overlap_slices), "depth of scan must be divisible by slab overlap"
+		if self.overlap_slices > 0 :
+			assert int(self.slabs_depth / self.overlap_slices) == (self.slabs_depth / self.overlap_slices), "depth of scan must be divisible by slab overlap"
 		assert int(self.slabs_depth / self.slabs_size) == (self.slabs_depth / self.slabs_size), "depth of scan must be divisible by slab size"
 
 		# -1 as first slab is double the height due to having nothing to overlap with
