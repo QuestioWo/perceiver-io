@@ -17,7 +17,7 @@ from perceiver.model.segmentation.segmentation import LitSegmentationMapper
 from perceiver.data.segmentation.common import coregister_image
 from perceiver.data.segmentation.miccai import CT_ONLY, IMAGE_SIZE, NUM_CLASSES, MICCAIDataModule, MICCAIPreprocessor, get_ct_only_dataset_files
 
-DATASET_ROOT = "/mnt/d/amos22"
+DATASET_ROOT = "/dev/shm/amos22"
 
 BATCH_SIZE = 1
 USE_CUDA = False
@@ -147,10 +147,10 @@ def load_model(ckpt_filename:str=None, load_last_ckpt:bool=USE_LAST_CHECKPOINT, 
 	return model
 
 
-def load_and_preprocess_data(generate_test_results:bool=GENERATE_MICCAI_TEST_RESULTS, coregister_loaded_images:bool=COREGISTER_IMAGES) :
+def load_and_preprocess_data(generate_test_results:bool=GENERATE_MICCAI_TEST_RESULTS, coregister_loaded_images:bool=COREGISTER_IMAGES, dataset:str="val") :
 	data_module = MICCAIDataModule(root=DATASET_ROOT, load_raw_instead=True)
 	print("Loading and preprocessing validation dataset...")
-	segmentation_dataset = data_module.load_dataset()
+	segmentation_dataset = data_module.load_dataset(split=dataset)
 	miccai_preproc = MICCAIPreprocessor()
 
 	segmentation_objects = []
@@ -164,17 +164,22 @@ def load_and_preprocess_data(generate_test_results:bool=GENERATE_MICCAI_TEST_RES
 
 		segmentation_objects = [{'image': sitk.ReadImage(os.path.join(DATASET_ROOT, file_name), sitk.sitkFloat32), 'filename': os.path.basename(file_name)} for file_name in tqdm(file_list)]
 	else :
-		segmentation_dataset = data_module.load_dataset("val")
-		segmentation_objects = [segmentation_dataset[-i] for i in range(COLS * ROWS)]
+		segmentation_objects = [segmentation_dataset[-i] for i in range(len(segmentation_dataset))]
+		# segmentation_objects = [segmentation_dataset[-i] for i in range(COLS * ROWS)]
 
 	if coregister_loaded_images :
 		print("Coregistering scans for inference...")
 		coregistered_images = [coregister_image(sitk.Cast(segmentation_objects[i]['image'], sitk.sitkFloat32), segmentation_dataset.get_coregistration_image()) for i in tqdm(range(len(segmentation_objects)))]
 	else :
 		print("Loading precoregistered scans for inference...")
+	
+		preproc_dir = "imagesVa_preprocessed"
+		if dataset == 'test' :
+			preproc_dir = "imagesTr_preprocessed"
+	
 		# segmentation_objects = [{"image" : None, "label" : obj['label'], "filename": obj['filename']} for obj in segmentation_objects]
-		_accompanying_transformations = [sitk.ReadTransform(os.path.join(DATASET_ROOT, "imagesVa_preprocessed", f['filename'].replace(".nii.gz", "_transformation.tfm"))) for f in segmentation_objects]
-		_coregistered_images_only = [sitk.ReadImage(os.path.join(DATASET_ROOT, "imagesVa_preprocessed", f['filename']), sitk.sitkFloat32) for f in tqdm(segmentation_objects)]
+		_accompanying_transformations = [sitk.ReadTransform(os.path.join(DATASET_ROOT, preproc_dir, f['filename'].replace(".nii.gz", "_transformation.tfm"))) for f in segmentation_objects]
+		_coregistered_images_only = [sitk.ReadImage(os.path.join(DATASET_ROOT, preproc_dir, f['filename']), sitk.sitkFloat32) for f in tqdm(segmentation_objects)]
 		coregistered_images = list(zip(_coregistered_images_only, _accompanying_transformations))
 
 	coregistered_transformations = [obj[1] for obj in coregistered_images]
@@ -270,7 +275,7 @@ def compute_and_print_metrics(segmentation_dataset, segmentation_objects, upscal
 	metrics_list = [
 		[["", ""], *[[v, v] for _,v in sorted(segmentation_dataset.get_labels().items(), key=lambda x: int(x[0]))[1:]]]
 	]
-	print("Computing metrics")
+	print("Computing metrics...")
 	for i in tqdm(range(len(segmentation_objects))) :
 		fname = segmentation_objects[i]['filename']
 		metrics_list.append([[fname, fname]])
@@ -333,7 +338,7 @@ def main() :
 
 	model.to(device=dev)
 
-	segmentation_dataset, segmentation_objects, imgs, coregistered_images, coregistered_transformations, miccai_preproc =  load_and_preprocess_data()
+	segmentation_dataset, segmentation_objects, imgs, coregistered_images, coregistered_transformations, miccai_preproc =  load_and_preprocess_data(dataset='test')
 
 	copy_of_imgs = [torch.clone(i[:,:,model.slabs_start:model.slabs_start+model.slabs_depth]) for i in imgs]
 
