@@ -85,9 +85,9 @@ class LitMapper(LitModel):
 		logits, y = self(batch)
 
 		ce_loss = self.ce_loss(logits, y.long())
-		# dice_loss = self.dice_loss(logits, y.long(), softmax=True)
-		# loss = 0.4 * ce_loss + 0.6 * dice_loss
-		loss = ce_loss
+		dice_loss = self.dice_loss(logits, y.long(), softmax=True)
+		loss = 0.9 * ce_loss + 0.1 * dice_loss
+		# loss = ce_loss
 		# loss = dice_loss
 
 		y_pred = logits.argmax(dim=1).int()
