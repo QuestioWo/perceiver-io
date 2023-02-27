@@ -76,7 +76,7 @@ class LitMapper(LitModel):
 	def __init__(self, *args: Any, **kwargs: Any):
 		super().__init__(*args, **kwargs)
 		self.ce_loss = nn.CrossEntropyLoss()
-		# self.dice_loss = DiceLoss(NUM_CLASSES)
+		self.dice_loss = DiceLoss(NUM_CLASSES)
 		# self.loss = SegmentationClassificationLoss()
 		self.dice = tm.Dice()
 		self.acc = tm.classification.accuracy.Accuracy(task="multiclass", num_classes=NUM_CLASSES, mdmc_reduce="global")
@@ -87,8 +87,6 @@ class LitMapper(LitModel):
 		ce_loss = self.ce_loss(logits, y.long())
 		dice_loss = self.dice_loss(logits, y.long(), softmax=True)
 		loss = 0.9 * ce_loss + 0.1 * dice_loss
-		# loss = ce_loss
-		# loss = dice_loss
 
 		y_pred = logits.argmax(dim=1).int()
 		dice_acc = self.dice(y_pred, y)

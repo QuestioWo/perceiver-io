@@ -10,4 +10,5 @@ results/
 *.zip
 *.ckpt
 coregistration_image.nii.gz
-log.txt
+*.txt
+*.pkl
