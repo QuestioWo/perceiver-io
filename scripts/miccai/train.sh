@@ -11,6 +11,7 @@ mkdir -p logs/miccai_seg && python -m perceiver.scripts.segmentation.mapper fit 
   --trainer.log_every_n_steps=2 \
   --data.num_workers=8 \
   --trainer.check_val_every_n_epoch=1 \
+  --trainer.precision=16 \
   --trainer.accelerator=gpu \
   --trainer.devices=1
 #   --trainer.fast_dev_run=True \

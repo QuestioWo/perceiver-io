@@ -2,6 +2,7 @@ from pytorch_lightning.cli import LightningArgumentParser
 
 from perceiver.model.segmentation.segmentation import LitSegmentationMapper
 from perceiver.scripts.cli import CLI
+from perceiver.data.segmentation.miccai import IMAGE_SIZE
 
 class DefaultWrapperCLI(CLI):
 	def __init__(self, model_class, default_parameters, run=True, **kwargs):
@@ -62,8 +63,8 @@ if __name__ == "__main__":
 		'model.decoder.num_cross_attention_heads': 2,
 		'model.encoder.dropout': 0.3,
 		'model.decoder.dropout': 0.3,
-		# 'model.slabs_start': 80,
-		# 'model.slabs_depth': 20,
+		'model.slabs_start': 0,
+		'model.slabs_depth': IMAGE_SIZE[0],
 		'model.slabs_size': 4,
 		'model.encoder.num_cross_attention_qk_channels': 4,
 		'model.encoder.num_cross_attention_v_channels': 4,

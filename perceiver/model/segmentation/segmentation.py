@@ -32,7 +32,7 @@ class SegmentationDecoderConfig(DecoderConfig):
 
 @dataclass
 class SegmentationEncoderConfig(EncoderConfig):
-	num_frequency_bands: int = 16
+	num_frequency_bands: int = NUM_CLASSES
 
 class DiceLoss(nn.Module):
     def __init__(self, n_classes):
