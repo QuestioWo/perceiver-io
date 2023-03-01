@@ -256,6 +256,7 @@ if __name__ == "__main__":
 	print("!!!!!!!!!!!!!!!!!!!!!!! Recommended args !!!!!!!!!!!!!!!!!!!!!!!")
 	print(recommended_args)
 	print("!!!!!!!!!!!!!!!!!!!! Optimisation completed !!!!!!!!!!!!!!!!!!!!")
+	print("Pareto front:", ng_optimizer.pareto_front())
 
 
 

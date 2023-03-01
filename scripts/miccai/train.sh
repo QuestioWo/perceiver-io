@@ -7,6 +7,7 @@ mkdir -p logs/miccai_seg && python -m perceiver.scripts.segmentation.mapper fit 
   --trainer.logger.name=miccai_seg \
   --data=MICCAIDataModule \
   --data.batch_size=1 \
+  --data.dataset_dir=/dev/shm/amos22 \
   --trainer.log_every_n_steps=2 \
   --data.num_workers=8 \
   --trainer.check_val_every_n_epoch=1 \
