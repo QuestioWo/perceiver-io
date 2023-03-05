@@ -15,7 +15,7 @@ from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 from tqdm import tqdm
 
-from perceiver.data.segmentation.common import channels_to_last, SegmentationPreprocessor, lift_transform, coregister_image_and_label, ImageInfo, zoom_sitk_image_image, zoom_sitk_image_label
+from perceiver.data.segmentation.common import channels_to_last, normalise_to_range, SegmentationPreprocessor, lift_transform, coregister_image_and_label, ImageInfo, zoom_sitk_image_image, zoom_sitk_image_label
 
 IMAGE_SIZE = (220, 256, 256)
 # IMAGE_SIZE = (165, 192, 192)
@@ -521,14 +521,16 @@ def miccai_transform(channels_last: bool = True, random_crop: Optional[int] = No
 			return t
 		return apply
 
-	# TODO: add random crop back in for 3d images
+	def remove_second_background(t: torch.Tensor) :
+		_, min_second = sorted(t.flatten())[0:2]
+		return convert_less_than_x_to_y(min_second, min_second)(t)
 
-	image_transform_list.append(convert_less_than_x_to_y(-1000, -1000))
+	image_transform_list.append(remove_second_background)
 	label_transform_list.append(convert_less_than_x_to_y(0, 0))
 	label_transform_list.append(convert_greater_than_x_to_y(NUM_CLASSES-1, 0))
 
 	if normalize :
-		image_transform_list.append(transforms.Normalize(mean=(0.5,), std=(0.5,)))
+		image_transform_list.append(normalise_to_range)
 
 
 	if channels_last:

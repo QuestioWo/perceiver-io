@@ -178,3 +178,6 @@ def computeCoregistrationTransformation(moving: sitk.Image, fixed: sitk.Image) :
 
 def channels_to_last(img: torch.Tensor):
 	return img.permute(1, 2, 0).contiguous()
+
+def normalise_to_range(t: torch.Tensor) :
+	return ((t - t.min()) / (t.max() - t.min()))

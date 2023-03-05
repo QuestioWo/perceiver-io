@@ -1,3 +1,5 @@
+import torch
+
 from pytorch_lightning.cli import LightningArgumentParser
 
 from perceiver.model.segmentation.segmentation import LitSegmentationMapper
@@ -74,5 +76,8 @@ if __name__ == "__main__":
 		'model.decoder.num_cross_attention_v_channels': 4,
 		'model.decoder.cross_attention_residual': True
 	}
+
+	torch.backends.cudnn.benchmark = True
+	torch.backends.cudnn.deterministic = False
 	
 	SegmentationMapperCLI(LitSegmentationMapper, default_parameters=current_default_parameters, description="Segmentation map generator", run=True)
