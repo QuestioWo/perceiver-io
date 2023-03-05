@@ -522,7 +522,7 @@ def miccai_transform(channels_last: bool = True, random_crop: Optional[int] = No
 		return apply
 
 	def remove_second_background(t: torch.Tensor) :
-		_, min_second = sorted(t.flatten())[0:2]
+		min_second = t[t > (t.min() + 1e-05)].min()
 		return convert_less_than_x_to_y(min_second, min_second)(t)
 
 	image_transform_list.append(remove_second_background)
