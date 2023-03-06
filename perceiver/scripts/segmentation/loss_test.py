@@ -10,7 +10,7 @@ from tqdm import tqdm
 from perceiver.model.segmentation.segmentation import DiceLoss
 from perceiver.data.segmentation.miccai import MICCAIDataModule, MICCAIPreprocessor, NUM_CLASSES
 
-data_module = MICCAIDataModule(root="AMOS22")
+data_module = MICCAIDataModule(dataset_dir="/dev/shm/amos22")
 segmentation_dataset = data_module.load_dataset("val")
 miccai_preproc = MICCAIPreprocessor()
 
@@ -47,7 +47,7 @@ print("y pred shape", y_pred.shape)
 print("first diff val", (t_gt_label.flatten().long() - y_pred.flatten().int())[0])
 print("diff bincount", np.bincount((t_gt_label.flatten().long() - y_pred.flatten().int()).abs()))
 
-loss_function = nn.CrossEntropyLoss()
+loss_function = DiceLoss(NUM_CLASSES)
 
 t_labels_classified = t_labels_classified.float()#.flatten(2)
 print("flattened labels classified shape", t_labels_classified.shape)

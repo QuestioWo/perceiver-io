@@ -102,7 +102,7 @@ def find_loss(index:int) :
 
 	preds = perform_inferences(imgs, model, dev)
 	
-	upscaled_preds, masked_labels = transform_and_upscale_predictions(model, preds, coregistered_images, coregistered_transformations, segmentation_objects, save_predictions_dir="results_" + str(index))
+	upscaled_preds, masked_labels = transform_and_upscale_predictions(model, preds, coregistered_images, coregistered_transformations, segmentation_objects, save_predictions_dir="/volume/results/results_" + str(index))
 	
 	mean_dsc = compute_and_print_metrics(segmentation_dataset, segmentation_objects, upscaled_preds, masked_labels)
 

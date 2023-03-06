@@ -17,7 +17,7 @@ from perceiver.model.segmentation.segmentation import LitSegmentationMapper
 from perceiver.data.segmentation.common import coregister_image
 from perceiver.data.segmentation.miccai import CT_ONLY, IMAGE_SIZE, NUM_CLASSES, MICCAIDataModule, MICCAIPreprocessor, get_ct_only_dataset_files
 
-DATASET_ROOT = "/dev/shm/amos22"
+DATASET_ROOT = "/volume/amos22"
 
 BATCH_SIZE = 1
 USE_CUDA = False
