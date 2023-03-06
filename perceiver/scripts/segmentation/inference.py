@@ -148,7 +148,7 @@ def load_model(ckpt_filename:str=None, load_last_ckpt:bool=USE_LAST_CHECKPOINT, 
 
 
 def load_and_preprocess_data(generate_test_results:bool=GENERATE_MICCAI_TEST_RESULTS, coregister_loaded_images:bool=COREGISTER_IMAGES, dataset:str="val") :
-	data_module = MICCAIDataModule(root=DATASET_ROOT, load_raw_instead=True)
+	data_module = MICCAIDataModule(dataset_dir=DATASET_ROOT, load_raw_instead=True)
 	print("Loading and preprocessing validation dataset...")
 	segmentation_dataset = data_module.load_dataset(split=dataset)
 	miccai_preproc = MICCAIPreprocessor()
