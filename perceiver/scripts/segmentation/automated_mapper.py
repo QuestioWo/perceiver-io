@@ -17,7 +17,7 @@ SLABS_SIZE = 4
 
 OPTIMISATION_BUDGET = 50
 
-OPTIMISER_PICKLE = "ng_optimiser.pkl"
+OPTIMISER_PICKLE = "/volume/ng_optimiser.pkl"
 
 ALL_MODEL_PARAMERTERS = [
 	# NOTE: Omitted/set values:
