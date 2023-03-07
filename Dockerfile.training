@@ -15,7 +15,8 @@ RUN /opt/poetry/bin/poetry install --no-root --all-extras
 
 COPY perceiver ./perceiver
 
-CMD ["mkdir", "-p", "/logs/miccai_seg" "&&", \
+CMD ["cp", "-r", "/volume/amos22", "/dev/shm", "&&", \
+	"mkdir", "-p", "/volume/logs/miccai_seg" "&&", \
 	"python", "-m", "perceiver.scripts.segmentation.automated_mapper", \
 	"fit", \
 	"--optimizer=AdamW", \
@@ -27,7 +28,7 @@ CMD ["mkdir", "-p", "/logs/miccai_seg" "&&", \
 	"--data=MICCAIDataModule", \
 	"--data.batch_size=8", \
 	"--data.num_workers=8", \
-	"--data.dataset_dir=/volume/amos22", \
+	"--data.dataset_dir=/dev/shm/amos22", \
 	"--trainer.log_every_n_steps=1", \
 	"--trainer.check_val_every_n_epoch=1", \
 	"--trainer.accelerator=gpu", \
