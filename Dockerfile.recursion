@@ -1,0 +1,60 @@
+FROM pytorch/pytorch:1.13.0-cuda11.6-cudnn8-runtime
+
+WORKDIR /app
+
+RUN apt-get update
+RUN apt-get install -y --no-install-recommends curl
+
+RUN curl -sSL https://install.python-poetry.org | POETRY_HOME=/opt/poetry python3 - --version 1.4.0
+
+COPY poetry.lock .
+COPY pyproject.toml .
+
+RUN /opt/poetry/bin/poetry config virtualenvs.create false
+RUN /opt/poetry/bin/poetry install --no-root --all-extras
+
+RUN apt install rsync -y
+
+COPY perceiver ./perceiver
+
+CMD ["/bin/bash", "-c", "rm -r /volume/logs_recursion | true && \
+mkdir -p /volume/logs_recursion && \
+mkdir -p /volume/logs_recursion/miccai_seg_recursion && \
+rm -f /volume/log_recursion.txt | true && \
+rsync -Pa /volume/amos22 /dev/shm && \
+python -m perceiver.scripts.segmentation.mapper \
+fit \
+--optimizer=AdamW \
+--optimizer.lr=5e-4 \
+--model.recursive_slices=2 \
+--trainer.max_epochs=350 \
+--trainer.precision=32 \
+--trainer.logger=TensorBoardLogger \
+--trainer.logger.save_dir=/volume/logs_recursion \
+--trainer.logger.name=miccai_seg_recursion \
+--data=MICCAIDataModule \
+--data.batch_size=1 \
+--data.num_workers=8 \
+--data.dataset_dir=/dev/shm/amos22 \
+--trainer.log_every_n_steps=1 \
+--trainer.check_val_every_n_epoch=1 \
+--trainer.accelerator=gpu \
+--trainer.devices='-1' 2>&1 | tee /volume/log_recursion.txt && \
+python -m perceiver.scripts.segmentation.mapper \
+fit \
+--optimizer=AdamW \
+--optimizer.lr=5e-4 \
+--model.recursive_slices=0 \
+--trainer.max_epochs=350 \
+--trainer.precision=32 \
+--trainer.logger=TensorBoardLogger \
+--trainer.logger.save_dir=/volume/logs_recursion \
+--trainer.logger.name=miccai_seg_recursion \
+--data=MICCAIDataModule \
+--data.batch_size=1 \
+--data.num_workers=8 \
+--data.dataset_dir=/dev/shm/amos22 \
+--trainer.log_every_n_steps=1 \
+--trainer.check_val_every_n_epoch=1 \
+--trainer.accelerator=gpu \
+--trainer.devices='-1' 2>&1 | tee -a /volume/log_recursion.txt"]

@@ -81,11 +81,21 @@ class LitMapper(LitModel):
 	def step(self, batch):
 		logits, y = self(batch)
 
+		current_dev = torch.device("cuda", 0)
+
+		logits = logits.to(current_dev)
+		y = y.to(current_dev)
+
+		self.dice = self.dice.to(current_dev)
+		self.dice_loss = self.dice_loss.to(current_dev)
+		self.ce_loss = self.ce_loss.to(current_dev)
+		self.acc = self.acc.to(current_dev)
+
 		ce_loss = self.ce_loss(logits, y.long())
 		dice_loss = self.dice_loss(logits, y.long(), softmax=True)
 		loss: torch.Tensor = 0.9 * ce_loss + 0.1 * dice_loss
 
-		y_pred = logits.argmax(dim=1).int()
+		y_pred = logits.argmax(dim=1).int().to(current_dev)
 		dice_acc = self.dice(y_pred, y)
 		raw_acc = self.acc(y_pred, y)
 

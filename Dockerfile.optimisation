@@ -16,15 +16,13 @@ RUN /opt/poetry/bin/poetry install --no-root --all-extras
 RUN apt install rsync -y
 
 COPY perceiver ./perceiver
-RUN echo "import torch; f = open('/dev/shm/num_gpus', 'w'); print(torch.cuda.device_count(), file=f, end='')" > ./perceiver/device_counter.py
 
-CMD ["/bin/bash", "-c", "python -m perceiver.device_counter && \
-cat /dev/shm/num_gpus && \
-rm -r /volume/logs && \
-mkdir -p /volume/logs && \
-mkdir -p /volume/logs/miccai_seg && \
+CMD ["/bin/bash", "-c", "rm -r /volume/logs_optimisation | true && \
+mkdir -p /volume/logs_optimisation && \
+mkdir -p /volume/logs_optimisation/miccai_seg_optimisation && \
 rm -r /volume/results/ && \
 mkdir -p /volume/results/ && \
+rm -f /volume/log_optimisation.txt && \
 rm -f /volume/ng_optimiser.pkl && \
 rsync -Pa /volume/amos22 /dev/shm && \
 python -m perceiver.scripts.segmentation.automated_mapper \
@@ -32,14 +30,16 @@ fit \
 --optimizer=AdamW \
 --optimizer.lr=5e-4 \
 --trainer.max_epochs=20 \
+--trainer.strategy='dp' \
+--trainer.precision=32 \
 --trainer.logger=TensorBoardLogger \
---trainer.logger.save_dir=/volume/logs \
---trainer.logger.name=miccai_seg \
+--trainer.logger.save_dir=/volume/logs_optimisation \
+--trainer.logger.name=miccai_seg_optimisation \
 --data=MICCAIDataModule \
---data.batch_size=1 \
+--data.batch_size=2 \
 --data.num_workers=8 \
 --data.dataset_dir=/dev/shm/amos22 \
 --trainer.log_every_n_steps=1 \
 --trainer.check_val_every_n_epoch=1 \
 --trainer.accelerator=gpu \
---trainer.devices=$(cat /dev/shm/num_gpus)"]
+--trainer.devices='-1' 2>&1 | tee /volume/log_optimisation.txt"]

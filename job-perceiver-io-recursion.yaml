@@ -1,0 +1,33 @@
+﻿apiVersion: batch/v1
+kind: Job
+metadata:
+  name: perceiver-io-recursion
+  namespace: msc23jimproject
+spec:
+  selector: {}
+  template:
+    metadata:
+      name: perceiver-io-recursion
+    spec:
+      volumes:
+        - name: fullvolume
+          persistentVolumeClaim:
+            claimName: msc23jimvol1claim
+        - name: dshm
+          emptyDir:
+            medium: Memory
+      containers:
+        - name: perceiver-io-recursion
+          image: questiowo/perceiver-io-recursion
+          resources: {}
+          volumeMounts:
+            - name: fullvolume
+              mountPath: /volume/
+            - name: dshm
+              mountPath: /dev/shm
+      nodeSelector:
+        node-cuda: '11'
+        node-gpu: 'rtxtitan'
+      restartPolicy: Never
+      securityContext:
+        runAsUser: 1001940000

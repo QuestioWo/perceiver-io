@@ -1,0 +1,33 @@
+﻿apiVersion: batch/v1
+kind: Job
+metadata:
+  name: perceiver-io-overlap
+  namespace: msc23jimproject
+spec:
+  selector: {}
+  template:
+    metadata:
+      name: perceiver-io-overlap
+    spec:
+      volumes:
+        - name: fullvolume
+          persistentVolumeClaim:
+            claimName: msc23jimvol1claim
+        - name: dshm
+          emptyDir:
+            medium: Memory
+      containers:
+        - name: perceiver-io-overlap
+          image: questiowo/perceiver-io-overlap
+          resources: {}
+          volumeMounts:
+            - name: fullvolume
+              mountPath: /volume/
+            - name: dshm
+              mountPath: /dev/shm
+      nodeSelector:
+        node-cuda: '11'
+        node-gpu: 'rtxtitan'
+      restartPolicy: Never
+      securityContext:
+        runAsUser: 1001940000
