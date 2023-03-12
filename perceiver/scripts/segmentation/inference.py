@@ -120,9 +120,12 @@ def calculate_metrics(pred: np.ndarray, gt: np.ndarray) -> Tuple[float, float]:
         return 0, 0
 
 
-def load_model(ckpt_filename:str=None, load_last_ckpt:bool=USE_LAST_CHECKPOINT, specific_version:str=LOAD_SPECIFIC_VERSION) :
+def load_model(ckpt_filename:str=None, load_last_ckpt:bool=USE_LAST_CHECKPOINT, specific_version:str=LOAD_SPECIFIC_VERSION, load_path:str=None) :
 	if ckpt_filename == None :
-		base_logs = os.path.join('/volume', 'logs', 'miccai_seg')
+		if load_path == None:
+			base_logs = os.path.join('logs', 'miccai_seg')
+		else :
+			base_logs = load_path
 		most_recent_version = os.path.join(base_logs, sorted(os.listdir(base_logs), key=natural_keys)[-1])
 		most_recent_checkpoints = os.path.join(most_recent_version, 'checkpoints')
 		if specific_version != None :

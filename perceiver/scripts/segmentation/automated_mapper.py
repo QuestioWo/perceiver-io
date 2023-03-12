@@ -86,7 +86,7 @@ def retreive_default_parameters(parameter_candidate) :
 
 
 def find_loss(index:int) :
-	model = load_model(specific_version=None) # load most recent version
+	model = load_model(specific_version=None, load_path=os.path.join("/volume", "logs_optimisation", "miccai_seg_optimisation")) # load most recent version
 
 	cuda = torch.cuda.is_available() and USE_CUDA_FOR_LOSS_INFERENCES
 	dev = "cpu"
