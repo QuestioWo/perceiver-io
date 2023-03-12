@@ -5,6 +5,8 @@ python -m perceiver.scripts.segmentation.mapper \
 	--optimizer=AdamW \
 	--optimizer.lr=5e-4 \
 	--model.recursive_slices=2 \
+	--model.slabs_start=80 \
+	--model.slabs_depth=12 \
 	--trainer.max_epochs=350 \
 	--trainer.precision=32 \
 	--trainer.logger=TensorBoardLogger \
@@ -24,6 +26,8 @@ python -m perceiver.scripts.segmentation.mapper \
 	--optimizer=AdamW \
 	--optimizer.lr=5e-4 \
 	--model.recursive_slices=0 \
+	--model.slabs_start=80 \
+	--model.slabs_depth=12 \
 	--trainer.max_epochs=350 \
 	--trainer.precision=32 \
 	--trainer.logger=TensorBoardLogger \
