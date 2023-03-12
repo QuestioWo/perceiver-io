@@ -11,8 +11,8 @@ trainer:
       monitor: 'val_dice'
       mode: max
       # save_weights_only: true
-      save_last: true
-      save_top_k: 2
+      save_last: false
+      save_top_k: 1
       every_n_epochs: 1
       save_on_train_epoch_end: false
   default_root_dir: logs
