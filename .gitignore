@@ -3,6 +3,7 @@ dist/
 .cache/
 __pycache__/
 logs/
+logs*/
 amos22/
 labelsTs/
 results/
