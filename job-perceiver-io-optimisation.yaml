@@ -27,7 +27,7 @@ spec:
               mountPath: /dev/shm
       nodeSelector:
         node-cuda: '11'
-        node-gpu: 'rtxtitan'
+        node-gpu/memory: '24'
       restartPolicy: Never
       securityContext:
         runAsUser: 1001940000

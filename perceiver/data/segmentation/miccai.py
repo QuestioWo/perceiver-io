@@ -454,9 +454,11 @@ class MICCAIDataModule(pl.LightningDataModule):
 
 		self.tf_train = miccai_transform(channels_last, random_crop=random_crop, normalize=normalize)
 		self.tf_valid = miccai_transform(channels_last, random_crop=None, normalize=normalize)
+		self.tf_test = miccai_transform(channels_last, random_crop=None, normalize=normalize)
 
 		self.ds_train = None
 		self.ds_valid = None
+		self.ds_test = None
 		
 		self.dataset_loader = None
 
@@ -481,8 +483,11 @@ class MICCAIDataModule(pl.LightningDataModule):
 		self.ds_train = self.load_dataset(split="train")
 		self.ds_train.set_transform(lift_transform(*self.tf_train))
 
-		self.ds_valid = self.load_dataset(split="test")
+		self.ds_valid = self.load_dataset(split="val")
 		self.ds_valid.set_transform(lift_transform(*self.tf_valid))
+
+		self.ds_test = self.load_dataset(split="test")
+		self.ds_test.set_transform(lift_transform(*self.tf_test))
 
 	def train_dataloader(self):
 		return DataLoader(
@@ -496,6 +501,15 @@ class MICCAIDataModule(pl.LightningDataModule):
 	def val_dataloader(self):
 		return DataLoader(
 			self.ds_valid,
+			shuffle=False,
+			batch_size=self.hparams.batch_size,
+			num_workers=self.hparams.num_workers,
+			pin_memory=self.hparams.pin_memory,
+		)
+
+	def test_dataloader(self):
+		return DataLoader(
+			self.ds_test,
 			shuffle=False,
 			batch_size=self.hparams.batch_size,
 			num_workers=self.hparams.num_workers,

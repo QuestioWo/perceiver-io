@@ -2,6 +2,7 @@ import nevergrad as ng
 import torch
 import traceback
 import gc
+import os
 
 from perceiver.scripts.segmentation.mapper import SegmentationMapperCLI
 from perceiver.model.segmentation.segmentation import LitSegmentationMapper
@@ -98,7 +99,7 @@ def find_loss(index:int) :
 
 	model.to(device=dev)
 
-	segmentation_dataset, segmentation_objects, imgs, coregistered_images, coregistered_transformations, _ =  load_and_preprocess_data(dataset='test')
+	segmentation_dataset, segmentation_objects, imgs, coregistered_images, coregistered_transformations, _ =  load_and_preprocess_data(dataset='val')
 
 	preds = perform_inferences(imgs, model, dev)
 	
