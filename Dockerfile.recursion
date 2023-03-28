@@ -16,8 +16,10 @@ RUN /opt/poetry/bin/poetry install --no-root --all-extras
 RUN apt install rsync -y
 
 COPY perceiver ./perceiver
+RUN echo "import torch; f = open('/dev/shm/num_gpus', 'w'); print(torch.cuda.device_count(), file=f, end='')" > ./perceiver/device_counter.py
 
-CMD ["/bin/bash", "-c", "rm -r /volume/logs_recursion | true && \
+CMD ["/bin/bash", "-c", "python -m perceiver.device_counter && \
+rm -r /volume/logs_recursion | true && \
 mkdir -p /volume/logs_recursion && \
 mkdir -p /volume/logs_recursion/miccai_seg_recursion && \
 rm -f /volume/log_recursion.txt | true && \
@@ -27,34 +29,40 @@ fit \
 --optimizer=AdamW \
 --optimizer.lr=5e-4 \
 --model.recursive_slices=2 \
+--model.slabs_start=80 \
+--model.slabs_depth=12 \
+--trainer.strategy='dp' \
 --trainer.max_epochs=350 \
 --trainer.precision=32 \
 --trainer.logger=TensorBoardLogger \
 --trainer.logger.save_dir=/volume/logs_recursion \
 --trainer.logger.name=miccai_seg_recursion \
 --data=MICCAIDataModule \
---data.batch_size=1 \
+--data.batch_size=$(cat /dev/shm/num_gpus) \
 --data.num_workers=8 \
 --data.dataset_dir=/dev/shm/amos22 \
 --trainer.log_every_n_steps=1 \
 --trainer.check_val_every_n_epoch=1 \
 --trainer.accelerator=gpu \
---trainer.devices='-1' 2>&1 | tee /volume/log_recursion.txt && \
+--trainer.devices=$(cat /dev/shm/num_gpus) 2>&1 | tee /volume/log_recursion.txt && \
 python -m perceiver.scripts.segmentation.mapper \
 fit \
 --optimizer=AdamW \
 --optimizer.lr=5e-4 \
 --model.recursive_slices=0 \
+--model.slabs_start=80 \
+--model.slabs_depth=12 \
+--trainer.strategy='dp' \
 --trainer.max_epochs=350 \
 --trainer.precision=32 \
 --trainer.logger=TensorBoardLogger \
 --trainer.logger.save_dir=/volume/logs_recursion \
 --trainer.logger.name=miccai_seg_recursion \
 --data=MICCAIDataModule \
---data.batch_size=1 \
+--data.batch_size=$(cat /dev/shm/num_gpus) \
 --data.num_workers=8 \
 --data.dataset_dir=/dev/shm/amos22 \
 --trainer.log_every_n_steps=1 \
 --trainer.check_val_every_n_epoch=1 \
 --trainer.accelerator=gpu \
---trainer.devices='-1' 2>&1 | tee -a /volume/log_recursion.txt"]
+--trainer.devices=$(cat /dev/shm/num_gpus) 2>&1 | tee -a /volume/log_recursion.txt"]

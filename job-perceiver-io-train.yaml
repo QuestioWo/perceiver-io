@@ -1,13 +1,13 @@
 ﻿apiVersion: batch/v1
 kind: Job
 metadata:
-  name: perceiver-io-recursion
+  name: perceiver-io-train-multi-titan
   namespace: msc23jimproject
 spec:
   selector: {}
   template:
     metadata:
-      name: perceiver-io-recursion
+      name: perceiver-io-train-multi-titan
     spec:
       volumes:
         - name: fullvolume
@@ -17,8 +17,8 @@ spec:
           emptyDir:
             medium: Memory
       containers:
-        - name: perceiver-io-recursion
-          image: questiowo/perceiver-io-recursion
+        - name: perceiver-io-train
+          image: questiowo/perceiver-io-train
           resources: {}
           volumeMounts:
             - name: fullvolume
@@ -26,7 +26,7 @@ spec:
             - name: dshm
               mountPath: /dev/shm
       nodeSelector:
-        node-gpu/memory: '24'
+        node-gpu: rtxtitan
       restartPolicy: Never
       securityContext:
         runAsUser: 1001940000

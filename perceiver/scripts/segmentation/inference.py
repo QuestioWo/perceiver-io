@@ -17,14 +17,15 @@ from perceiver.model.segmentation.segmentation import LitSegmentationMapper
 from perceiver.data.segmentation.common import coregister_image
 from perceiver.data.segmentation.miccai import CT_ONLY, IMAGE_SIZE, NUM_CLASSES, MICCAIDataModule, MICCAIPreprocessor, get_ct_only_dataset_files
 
-DATASET_ROOT = "/dev/shm/amos22"
+DATASET_ROOT = "/mnt/d/amos22"
 
 BATCH_SIZE = 1
-USE_CUDA = False
+USE_CUDA = True
 COLS, ROWS = 5, 5
 
-LOAD_SPECIFIC_VERSION = 'version_0'
-USE_LAST_CHECKPOINT = False
+DEFAULT_LOGS = os.path.join('logs_optimal_multi', 'miccai_seg_optimal_multi')
+LOAD_SPECIFIC_VERSION = 'version_33'
+USE_LAST_CHECKPOINT = True
 
 GENERATE_MICCAI_TEST_RESULTS = False
 SAVE_PREDICTIONS = GENERATE_MICCAI_TEST_RESULTS or True
@@ -36,7 +37,10 @@ COREGISTER_IMAGES = not GENERATE_MICCAI_TEST_RESULTS and False
 DISPLAY_DIFFS = not GENERATE_MICCAI_TEST_RESULTS and False
 DEFAULT_SLICE = 42
 DISPLAY_UPSCALED_INFERENCE_RESULTS = False
+DISPLAY_ANY_RESULTS = False
 
+CT_ONLY_INF = 0
+DATASET_INFERENCE = 'val'
 
 def atoi(text):
 	return int(text) if text.isdigit() else text
@@ -123,7 +127,7 @@ def calculate_metrics(pred: np.ndarray, gt: np.ndarray) -> Tuple[float, float]:
 def load_model(ckpt_filename:str=None, load_last_ckpt:bool=USE_LAST_CHECKPOINT, specific_version:str=LOAD_SPECIFIC_VERSION, load_path:str=None) :
 	if ckpt_filename == None :
 		if load_path == None:
-			base_logs = os.path.join('logs', 'miccai_seg')
+			base_logs = DEFAULT_LOGS
 		else :
 			base_logs = load_path
 		most_recent_version = os.path.join(base_logs, sorted(os.listdir(base_logs), key=natural_keys)[-1])
@@ -150,8 +154,8 @@ def load_model(ckpt_filename:str=None, load_last_ckpt:bool=USE_LAST_CHECKPOINT, 
 	return model
 
 
-def load_and_preprocess_data(generate_test_results:bool=GENERATE_MICCAI_TEST_RESULTS, coregister_loaded_images:bool=COREGISTER_IMAGES, dataset:str="val") :
-	data_module = MICCAIDataModule(dataset_dir=DATASET_ROOT, load_raw_instead=True)
+def load_and_preprocess_data(generate_test_results:bool=GENERATE_MICCAI_TEST_RESULTS, coregister_loaded_images:bool=COREGISTER_IMAGES, dataset:str="test") :
+	data_module = MICCAIDataModule(dataset_dir=DATASET_ROOT, load_raw_instead=True, ct_only=CT_ONLY_INF)
 	print("Loading and preprocessing validation dataset...")
 	segmentation_dataset = data_module.load_dataset(split=dataset)
 	miccai_preproc = MICCAIPreprocessor()
@@ -159,10 +163,10 @@ def load_and_preprocess_data(generate_test_results:bool=GENERATE_MICCAI_TEST_RES
 	segmentation_objects = []
 	if generate_test_results :
 		file_list = segmentation_dataset.metadata['test']
-		if CT_ONLY :
+		if CT_ONLY_INF :
 			file_list = [f['image'] for f in get_ct_only_dataset_files(file_list)]
 
-		file_list = file_list[:len(file_list) // 2]
+		# file_list = file_list[:len(file_list) // 2]
 		# file_list = file_list[len(file_list) // 2:]
 
 		segmentation_objects = [{'image': sitk.ReadImage(os.path.join(DATASET_ROOT, file_name), sitk.sitkFloat32), 'filename': os.path.basename(file_name)} for file_name in tqdm(file_list)]
@@ -215,6 +219,7 @@ def transform_and_upscale_predictions(model: LitSegmentationMapper, preds, coreg
 	print("Upscaling predictions...")
 	upscaled_preds = []
 	prediction_sitk_imgs = []
+	downscaled_prediction_sitk_imgs = []
 	masked_labels = []
 	for i, p in tqdm(enumerate(preds)) :
 		# Convert to sitk.Image to perform transformation then back to np.ndarray for visualisation
@@ -232,6 +237,7 @@ def transform_and_upscale_predictions(model: LitSegmentationMapper, preds, coreg
 
 		p = sitk.GetImageFromArray(full_input)
 		p.CopyInformation(coregistered_images[i][0])
+		downscaled_prediction_sitk_imgs.append(p)
 		p = sitk.Resample(p, segmentation_objects[i]['image'], coregistered_transformations[i].GetInverse(), sitk.sitkNearestNeighbor, 0)
 		p.SetDirection(coregistered_images[i][0].GetDirection())
 		p = sitk.Cast(p, sitk.sitkUInt8)
@@ -257,6 +263,11 @@ def transform_and_upscale_predictions(model: LitSegmentationMapper, preds, coreg
 		print("Saving prediction images...")
 		for i, p in tqdm(enumerate(prediction_sitk_imgs)) :
 			out_fname = os.path.join(save_predictions_dir, "%s.nii.gz" % (segmentation_objects[i]['filename']))
+			sitk.WriteImage(p, out_fname)
+
+		print("Saving downscaled prediction images...")
+		for i, p in tqdm(enumerate(downscaled_prediction_sitk_imgs)) :
+			out_fname = os.path.join(save_predictions_dir, "%s_small.nii.gz" % (segmentation_objects[i]['filename']))
 			sitk.WriteImage(p, out_fname)
 
 	return upscaled_preds, masked_labels
@@ -312,18 +323,20 @@ def compute_and_print_metrics(segmentation_dataset, segmentation_objects, upscal
 		print("")
 	print("")
 
-	total_dice = 0
-	total_hd = 0
+	total_dices = [0] * (NUM_CLASSES - 1)
+	total_hds = [0] * (NUM_CLASSES - 1)
 	for score_sets in metrics_list[1:] :
-		for s in score_sets[1:] :
-			total_dice += s[0]
-			total_hd += s[1]
-	total_values = (len(metrics_list) * len(metrics_list[0]))
+		for i, s in enumerate(score_sets[1:]) :
+			total_dices[i] += s[0]
+			total_hds[i] += s[1]
 
-	mean_dsc = (total_dice / total_values)
-	mean_hd95 = (total_hd / total_values)
+	average_dices = [d / (len(metrics_list) - 1) for d in total_dices]
+	average_hds = [d / (len(metrics_list) - 1) for d in total_hds]
 
-	print("Mean DSC := %.3f, Mean HD95 := %.3f" % (mean_dsc, mean_hd95))
+	mean_dsc = (sum(average_dices) / len(average_dices))
+	mean_hd95 = (sum(average_hds) / len(average_hds))
+
+	print("Mean DSC := %.9f, Mean HD95 := %.9f" % (mean_dsc, mean_hd95))
 
 	return mean_dsc
 
@@ -341,7 +354,7 @@ def main() :
 
 	model.to(device=dev)
 
-	segmentation_dataset, segmentation_objects, imgs, coregistered_images, coregistered_transformations, miccai_preproc =  load_and_preprocess_data(dataset='test')
+	segmentation_dataset, segmentation_objects, imgs, coregistered_images, coregistered_transformations, miccai_preproc =  load_and_preprocess_data(dataset=DATASET_INFERENCE)
 
 	copy_of_imgs = [torch.clone(i[:,:,model.slabs_start:model.slabs_start+model.slabs_depth]) for i in imgs]
 
@@ -377,14 +390,15 @@ def main() :
 		segmentation_objects[i]['image'] = None
 
 	tracker = None
-	if DISPLAY_UPSCALED_INFERENCE_RESULTS :
-		tracker = IndexTrackers(axes, imgs_raw, upscaled_preds, diffs, segmentation_objects)
-	else :
-		tracker = IndexTrackers(axes, copy_of_imgs, preds, diffs, segmentation_objects)
-	
-	fig.canvas.mpl_connect('scroll_event', tracker.on_scroll)
+	if DISPLAY_ANY_RESULTS :
+		if DISPLAY_UPSCALED_INFERENCE_RESULTS :
+			tracker = IndexTrackers(axes, imgs_raw, upscaled_preds, diffs, segmentation_objects)
+		else :
+			tracker = IndexTrackers(axes, copy_of_imgs, preds, diffs, segmentation_objects)
+		
+		fig.canvas.mpl_connect('scroll_event', tracker.on_scroll)
 
-	plt.show()
+		plt.show()
 
 if __name__ == "__main__" :
 	main()

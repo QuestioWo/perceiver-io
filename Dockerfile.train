@@ -1,0 +1,66 @@
+FROM pytorch/pytorch:1.13.0-cuda11.6-cudnn8-runtime
+
+WORKDIR /app
+
+RUN apt-get update
+RUN apt-get install -y --no-install-recommends curl
+
+RUN curl -sSL https://install.python-poetry.org | POETRY_HOME=/opt/poetry python3 - --version 1.4.0
+
+COPY poetry.lock .
+COPY pyproject.toml .
+
+RUN /opt/poetry/bin/poetry config virtualenvs.create false
+RUN /opt/poetry/bin/poetry install --no-root --all-extras
+
+RUN apt install rsync -y
+
+COPY perceiver ./perceiver
+RUN echo "import torch; f = open('/dev/shm/num_gpus', 'w'); print(torch.cuda.device_count(), file=f, end='')" > ./perceiver/device_counter.py
+
+# multi-modal train only
+CMD ["/bin/bash", "-c", "python -m perceiver.device_counter && \
+mkdir -p /volume/logs_optimal && \
+mkdir -p /volume/logs_optimal/miccai_seg_optimal && \
+python -m perceiver.scripts.segmentation.mapper \
+fit \
+--optimizer=AdamW \
+--optimizer.lr=5e-4 \
+--trainer.max_epochs=150 \
+--trainer.strategy='dp' \
+--trainer.precision=32 \
+--trainer.logger=TensorBoardLogger \
+--trainer.logger.save_dir=/volume/logs_optimal_multi \
+--trainer.logger.name=miccai_seg_optimal_multi \
+--data=MICCAIDataModule \
+--data.batch_size=2 \
+--data.num_workers=8 \
+--data.dataset_dir=/volume/amos22 \
+--data.ct_only=0 \
+--trainer.log_every_n_steps=1 \
+--trainer.check_val_every_n_epoch=1 \
+--trainer.accelerator=gpu \
+--trainer.resume_from_checkpoint=/volume/logs_optimal_multi/miccai_seg_optimal_multi/version_19/checkpoints/last.ckpt \
+--trainer.devices='0,4' 2>&1 | tee -a /volume/log_optimal_multi.txt"]
+
+# single-modal train only
+# CMD ["/bin/bash", "-c", "# python -m perceiver.scripts.segmentation.mapper \
+# fit \
+# --optimizer=AdamW \
+# --optimizer.lr=5e-4 \
+# --trainer.max_epochs=150 \
+# --trainer.strategy='dp' \
+# --trainer.precision=32 \
+# --trainer.logger=TensorBoardLogger \
+# --trainer.logger.save_dir=/volume/logs_optimal \
+# --trainer.logger.name=miccai_seg_optimal \
+# --data=MICCAIDataModule \
+# --data.batch_size=1 \
+# --data.num_workers=8 \
+# --data.dataset_dir=/volume/amos22 \
+# --data.ct_only=1 \
+# --trainer.log_every_n_steps=1 \
+# --trainer.check_val_every_n_epoch=1 \
+# --trainer.accelerator=gpu \
+# --trainer.resume_from_checkpoint=/volume/logs_optimal/miccai_seg_optimal/version_10/checkpoints/last.ckpt \
+# --trainer.devices='1' 2>&1 | tee -a /volume/log_optimal.txt"]

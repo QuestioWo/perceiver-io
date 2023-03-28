@@ -6,7 +6,7 @@ import os
 
 from perceiver.scripts.segmentation.mapper import SegmentationMapperCLI
 from perceiver.model.segmentation.segmentation import LitSegmentationMapper
-from perceiver.scripts.segmentation.inference import compute_and_print_metrics, load_and_preprocess_data, load_model, perform_inferences, transform_and_upscale_predictions
+from perceiver.scripts.segmentation.inference import compute_and_print_metrics, load_and_preprocess_data, load_model, natural_keys, perform_inferences, transform_and_upscale_predictions
 
 USE_CUDA_FOR_LOSS_INFERENCES = True
 
@@ -56,8 +56,18 @@ ALL_MODEL_PARAMERTERS = [
 ]
 
 PAST_CONFIG = [
+	{'model.num_latents': 512, 'model.num_latent_channels': 128, 'model.overlap_slices': 2, 'model.recursive_slices': 1, 'model.encoder.num_frequency_bands': 4, 'model.encoder.num_cross_attention_layers': 2, 'model.encoder.num_cross_attention_heads': 2, 'model.encoder.num_self_attention_blocks': 2, 'model.encoder.num_self_attention_layers_per_block': 4, 'model.encoder.num_self_attention_heads': 2, 'model.decoder.num_cross_attention_heads': 2, 'model.encoder.dropout': 0.3, 'model.decoder.dropout': 0.3, 'model.slabs_start': 80, 'model.slabs_depth': 12, 'model.slabs_size': 4, 'model.encoder.num_cross_attention_qk_channels': 4, 'model.encoder.num_cross_attention_v_channels': 4, 'model.encoder.num_self_attention_qk_channels': 4, 'model.encoder.num_self_attention_v_channels': 4, 'model.decoder.num_cross_attention_qk_channels': 4, 'model.decoder.num_cross_attention_v_channels': 4, 'model.decoder.cross_attention_residual': True},
+	{'model.num_latents': 1026, 'model.num_latent_channels': 512, 'model.overlap_slices': 2, 'model.recursive_slices': 2, 'model.encoder.num_frequency_bands': 64, 'model.encoder.num_cross_attention_layers': 2, 'model.encoder.num_cross_attention_heads': 2, 'model.encoder.num_self_attention_blocks': 2, 'model.encoder.num_self_attention_layers_per_block': 2, 'model.encoder.num_self_attention_heads': 2, 'model.decoder.num_cross_attention_heads': 2, 'model.encoder.dropout': 0.3, 'model.decoder.dropout': 0.3, 'model.slabs_start': 80, 'model.slabs_depth': 12, 'model.slabs_size': 4, 'model.encoder.num_cross_attention_qk_channels': 4, 'model.encoder.num_cross_attention_v_channels': 4, 'model.encoder.num_self_attention_qk_channels': 4, 'model.encoder.num_self_attention_v_channels': 4, 'model.decoder.num_cross_attention_qk_channels': 4, 'model.decoder.num_cross_attention_v_channels': 4, 'model.decoder.cross_attention_residual': True},
+	{'model.num_latents': 512, 'model.num_latent_channels': 409, 'model.overlap_slices': 2, 'model.recursive_slices': 3, 'model.encoder.num_frequency_bands': 4, 'model.encoder.num_cross_attention_layers': 2, 'model.encoder.num_cross_attention_heads': 2, 'model.encoder.num_self_attention_blocks': 2, 'model.encoder.num_self_attention_layers_per_block': 4, 'model.encoder.num_self_attention_heads': 2, 'model.decoder.num_cross_attention_heads': 2, 'model.encoder.dropout': 0.3, 'model.decoder.dropout': 0.3, 'model.slabs_start': 80, 'model.slabs_depth': 12, 'model.slabs_size': 4, 'model.encoder.num_cross_attention_qk_channels': 4, 'model.encoder.num_cross_attention_v_channels': 4, 'model.encoder.num_self_attention_qk_channels': 4, 'model.encoder.num_self_attention_v_channels': 4, 'model.decoder.num_cross_attention_qk_channels': 4, 'model.decoder.num_cross_attention_v_channels': 4, 'model.decoder.cross_attention_residual': True},
+	{'model.num_latents': 512, 'model.num_latent_channels': 409, 'model.overlap_slices': 2, 'model.recursive_slices': 3, 'model.encoder.num_frequency_bands': 123, 'model.encoder.num_cross_attention_layers': 2, 'model.encoder.num_cross_attention_heads': 3, 'model.encoder.num_self_attention_blocks': 2, 'model.encoder.num_self_attention_layers_per_block': 4, 'model.encoder.num_self_attention_heads': 2, 'model.decoder.num_cross_attention_heads': 2, 'model.encoder.dropout': 0.3, 'model.decoder.dropout': 0.3, 'model.slabs_start': 80, 'model.slabs_depth': 12, 'model.slabs_size': 4, 'model.encoder.num_cross_attention_qk_channels': 6, 'model.encoder.num_cross_attention_v_channels': 6, 'model.encoder.num_self_attention_qk_channels': 4, 'model.encoder.num_self_attention_v_channels': 4, 'model.decoder.num_cross_attention_qk_channels': 4, 'model.decoder.num_cross_attention_v_channels': 4, 'model.decoder.cross_attention_residual': True},
+	{'model.num_latents': 512, 'model.num_latent_channels': 251, 'model.overlap_slices': 2, 'model.recursive_slices': 3, 'model.encoder.num_frequency_bands': 123, 'model.encoder.num_cross_attention_layers': 2, 'model.encoder.num_cross_attention_heads': 3, 'model.encoder.num_self_attention_blocks': 3, 'model.encoder.num_self_attention_layers_per_block': 4, 'model.encoder.num_self_attention_heads': 2, 'model.decoder.num_cross_attention_heads': 2, 'model.encoder.dropout': 0.3, 'model.decoder.dropout': 0.3, 'model.slabs_start': 80, 'model.slabs_depth': 12, 'model.slabs_size': 4, 'model.encoder.num_cross_attention_qk_channels': 6, 'model.encoder.num_cross_attention_v_channels': 6, 'model.encoder.num_self_attention_qk_channels': 4, 'model.encoder.num_self_attention_v_channels': 4, 'model.decoder.num_cross_attention_qk_channels': 4, 'model.decoder.num_cross_attention_v_channels': 4, 'model.decoder.cross_attention_residual': True},
+	{'model.num_latents': 512, 'model.num_latent_channels': 409, 'model.overlap_slices': 2, 'model.recursive_slices': 3, 'model.encoder.num_frequency_bands': 123, 'model.encoder.num_cross_attention_layers': 2, 'model.encoder.num_cross_attention_heads': 3, 'model.encoder.num_self_attention_blocks': 2, 'model.encoder.num_self_attention_layers_per_block': 2, 'model.encoder.num_self_attention_heads': 2, 'model.decoder.num_cross_attention_heads': 2, 'model.encoder.dropout': 0.3, 'model.decoder.dropout': 0.3, 'model.slabs_start': 80, 'model.slabs_depth': 12, 'model.slabs_size': 4, 'model.encoder.num_cross_attention_qk_channels': 6, 'model.encoder.num_cross_attention_v_channels': 6, 'model.encoder.num_self_attention_qk_channels': 4, 'model.encoder.num_self_attention_v_channels': 4, 'model.decoder.num_cross_attention_qk_channels': 4, 'model.decoder.num_cross_attention_v_channels': 4, 'model.decoder.cross_attention_residual': True},
+	{'model.num_latents': 1020, 'model.num_latent_channels': 409, 'model.overlap_slices': 1, 'model.recursive_slices': 3, 'model.encoder.num_frequency_bands': 74, 'model.encoder.num_cross_attention_layers': 2, 'model.encoder.num_cross_attention_heads': 3, 'model.encoder.num_self_attention_blocks': 2, 'model.encoder.num_self_attention_layers_per_block': 4, 'model.encoder.num_self_attention_heads': 3, 'model.decoder.num_cross_attention_heads': 3, 'model.encoder.dropout': 0.3, 'model.decoder.dropout': 0.3, 'model.slabs_start': 80, 'model.slabs_depth': 12, 'model.slabs_size': 4, 'model.encoder.num_cross_attention_qk_channels': 6, 'model.encoder.num_cross_attention_v_channels': 6, 'model.encoder.num_self_attention_qk_channels': 6, 'model.encoder.num_self_attention_v_channels': 6, 'model.decoder.num_cross_attention_qk_channels': 6, 'model.decoder.num_cross_attention_v_channels': 6, 'model.decoder.cross_attention_residual': True},
+	{'model.num_latents': 512, 'model.num_latent_channels': 409, 'model.overlap_slices': 2, 'model.recursive_slices': 2, 'model.encoder.num_frequency_bands': 123, 'model.encoder.num_cross_attention_layers': 2, 'model.encoder.num_cross_attention_heads': 3, 'model.encoder.num_self_attention_blocks': 2, 'model.encoder.num_self_attention_layers_per_block': 4, 'model.encoder.num_self_attention_heads': 2, 'model.decoder.num_cross_attention_heads': 2, 'model.encoder.dropout': 0.3, 'model.decoder.dropout': 0.3, 'model.slabs_start': 80, 'model.slabs_depth': 12, 'model.slabs_size': 4, 'model.encoder.num_cross_attention_qk_channels': 6, 'model.encoder.num_cross_attention_v_channels': 6, 'model.encoder.num_self_attention_qk_channels': 4, 'model.encoder.num_self_attention_v_channels': 4, 'model.decoder.num_cross_attention_qk_channels': 4, 'model.decoder.num_cross_attention_v_channels': 4, 'model.decoder.cross_attention_residual': True},
+	{'model.num_latents': 512, 'model.num_latent_channels': 409, 'model.overlap_slices': 2, 'model.recursive_slices': 3, 'model.encoder.num_frequency_bands': 42, 'model.encoder.num_cross_attention_layers': 2, 'model.encoder.num_cross_attention_heads': 3, 'model.encoder.num_self_attention_blocks': 2, 'model.encoder.num_self_attention_layers_per_block': 4, 'model.encoder.num_self_attention_heads': 2, 'model.decoder.num_cross_attention_heads': 2, 'model.encoder.dropout': 0.3, 'model.decoder.dropout': 0.3, 'model.slabs_start': 80, 'model.slabs_depth': 12, 'model.slabs_size': 4, 'model.encoder.num_cross_attention_qk_channels': 6, 'model.encoder.num_cross_attention_v_channels': 6, 'model.encoder.num_self_attention_qk_channels': 4, 'model.encoder.num_self_attention_v_channels': 4, 'model.decoder.num_cross_attention_qk_channels': 4, 'model.decoder.num_cross_attention_v_channels': 4, 'model.decoder.cross_attention_residual': True},
 ]
 PAST_LOSS = [
+	0.07569444, 0.09068072, 0.06783247, 0.06761980, 0.07806760, 0.07555628, 1.00000000, 0.07580739, 0.07397062
 ]
 
 def retreive_default_parameters(parameter_candidate) :
@@ -108,6 +118,14 @@ def find_loss(index:int) :
 	mean_dsc = compute_and_print_metrics(segmentation_dataset, segmentation_objects, upscaled_preds, masked_labels)
 
 	return 1-mean_dsc # negation of mean dsc, meaning better models have lower loss
+
+def find_loss_simple(index:int) :
+	base_logs = os.path.join("/volume", "logs_optimisation", "miccai_seg_optimisation")
+	most_recent_version = os.path.join(base_logs, sorted(os.listdir(base_logs), key=natural_keys)[-1])
+	most_recent_checkpoints = os.path.join(most_recent_version, 'checkpoints')
+	all_ckpts = list(filter(lambda x: x.startswith("epoch"), os.listdir(most_recent_checkpoints)))
+	dice_scores = [float(x.split("val_dice=")[-1].split(".ckpt")[0]) for x in all_ckpts]
+	return 1-max(dice_scores)
 
 if __name__ == "__main__":
 	torch.backends.cudnn.benchmark = True
@@ -203,7 +221,7 @@ if __name__ == "__main__":
 
 				gc.collect()
 
-				loss = find_loss(i)
+				loss = find_loss_simple(i)
 
 		except Exception :
 			print("!!!!!!!!!!!!!!!!!!! Errored during training !!!!!!!!!!!!!!!!!!!!")

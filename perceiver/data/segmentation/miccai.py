@@ -25,9 +25,9 @@ NUM_CLASSES = 16
 
 COREGISTRATION_IMAGE_FILENAME = "coregistration_image" # + ".nii.gz"
 
-SKIP_PREPROCESSED_CHECK = False
+SKIP_PREPROCESSED_CHECK = True
 
-CT_ONLY = True
+CT_ONLY = 1
 
 class MICCAIPreprocessor(SegmentationPreprocessor):
 	def __init__(self, channels_last: bool = True, normalize: bool = True):
@@ -85,7 +85,7 @@ class MICCAILoader() :
 
 	SCAN_TO_COREGISTER_TO = None
 	
-	def __init__(self, root, load_raw_instead) :
+	def __init__(self, root, load_raw_instead, ct_only: int = CT_ONLY) :
 		self.root = root
 
 		if not os.path.exists(root) :
@@ -121,7 +121,7 @@ class MICCAILoader() :
 		self._task_training_dataset = self.metadata['training']
 		self._task_validation_dataset = self.metadata['validation']
 
-		if CT_ONLY :
+		if ct_only == 1 :
 			self._task_training_dataset = get_ct_only_dataset_files(self._task_training_dataset)
 			self._task_validation_dataset = get_ct_only_dataset_files(self._task_validation_dataset)
 		
@@ -437,6 +437,7 @@ class MICCAIDataModule(pl.LightningDataModule):
 	def __init__(
 		self,
 		dataset_dir: str = "/mnt/d/amos22",
+		ct_only: int = CT_ONLY,
 		normalize: bool = True,
 		channels_last: bool = True,
 		random_crop: Optional[int] = None,
@@ -451,6 +452,10 @@ class MICCAIDataModule(pl.LightningDataModule):
 		self.save_hyperparameters()
 		self.channels_last = channels_last
 		self.load_raw_instead = load_raw_instead
+		self.ct_only = CT_ONLY if self.hparams.ct_only == None else self.hparams.ct_only
+
+		with open("/dev/shm/ct_only", "w") as f :
+			print(self.ct_only, file=f, end='')
 
 		self.tf_train = miccai_transform(channels_last, random_crop=random_crop, normalize=normalize)
 		self.tf_valid = miccai_transform(channels_last, random_crop=None, normalize=normalize)
@@ -475,7 +480,7 @@ class MICCAIDataModule(pl.LightningDataModule):
 
 	def load_dataset(self, split: Optional[str] = None):
 		if self.dataset_loader == None :
-			self.dataset_loader = MICCAILoader(self.hparams.dataset_dir, self.load_raw_instead)
+			self.dataset_loader = MICCAILoader(self.hparams.dataset_dir, self.load_raw_instead, self.ct_only)
 		
 		return self.dataset_loader.get_split(split)
 

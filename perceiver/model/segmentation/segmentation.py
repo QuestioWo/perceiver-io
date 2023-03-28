@@ -21,7 +21,7 @@ from perceiver.model.core import (
 from perceiver.model.core.lightning import LitModel
 from perceiver.model.core.config import DecoderConfig, EncoderConfig, PerceiverConfig
 from perceiver.model.image.common import FourierPositionEncoding
-from perceiver.data.segmentation.miccai import IMAGE_SIZE, NUM_CLASSES
+from perceiver.data.segmentation.miccai import CT_ONLY, IMAGE_SIZE, NUM_CLASSES
 from perceiver.model.core.modules import OutputAdapter
 
 @dataclass
@@ -75,49 +75,46 @@ class LitMapper(LitModel):
 		super().__init__(*args, **kwargs)
 		self.ce_loss = nn.modules.loss.CrossEntropyLoss()
 		self.dice_loss = DiceLoss(NUM_CLASSES)
-		self.dice = tm.Dice()
-		self.acc = tm.classification.accuracy.Accuracy(task="multiclass", num_classes=NUM_CLASSES, mdmc_reduce="global")
+		self.dice = tm.Dice(average='macro', num_classes=NUM_CLASSES)
+
+		self.ct_only = CT_ONLY
+		with open("/dev/shm/ct_only", "r") as f :
+			self.ct_only = int(f.read())
 
 	def step(self, batch):
 		logits, y = self(batch)
-
-		current_dev = torch.device("cuda", 0)
-
-		logits = logits.to(current_dev)
-		y = y.to(current_dev)
-
-		self.dice = self.dice.to(current_dev)
-		self.dice_loss = self.dice_loss.to(current_dev)
-		self.ce_loss = self.ce_loss.to(current_dev)
-		self.acc = self.acc.to(current_dev)
 
 		ce_loss = self.ce_loss(logits, y.long())
 		dice_loss = self.dice_loss(logits, y.long(), softmax=True)
 		loss: torch.Tensor = 0.9 * ce_loss + 0.1 * dice_loss
 
+		current_dev = torch.device("cuda", 0)
 		y_pred = logits.argmax(dim=1).int().to(current_dev)
-		dice_acc = self.dice(y_pred, y)
-		raw_acc = self.acc(y_pred, y)
 
-		return loss, raw_acc, dice_acc
+		y = y.to(current_dev)
+		self.dice = self.dice.to(current_dev)
+
+		dice_acc = self.dice(y_pred, y)
+
+		return loss, dice_acc
 
 	def training_step(self, batch, batch_idx):
-		loss, acc, dice = self.step(batch)
+		loss, dice = self.step(batch)
 		self.log("train_loss", loss)
-		self.log("train_acc", acc, prog_bar=True)
+		# self.log("train_acc", acc, prog_bar=True)
 		self.log("train_dice", dice, prog_bar=True)
 		return loss
 
 	def validation_step(self, batch, batch_idx):
-		loss, acc, dice = self.step(batch)
+		loss, dice = self.step(batch)
 		self.log("val_loss", loss, prog_bar=True, sync_dist=True)
-		self.log("val_acc", acc, prog_bar=True, sync_dist=True)
+		# self.log("val_acc", acc, prog_bar=True, sync_dist=True)
 		self.log("val_dice", dice, prog_bar=True, sync_dist=True)
 
 	def test_step(self, batch, batch_idx):
-		loss, acc, dice = self.step(batch)
+		loss, dice = self.step(batch)
 		self.log("test_loss", loss, sync_dist=True)
-		self.log("test_acc", acc, sync_dist=True)
+		# self.log("test_acc", acc, sync_dist=True)
 		self.log("test_dice", dice, sync_dist=True)
 
 
@@ -276,7 +273,8 @@ class LitSegmentationMapper(LitMapper):
 			# addition means that no averaging has to take place and the maxes/predictions
 			# will be correct and efficient
 			full_results[:,:,:,:,start_location:end_location] += logits
-			prev_recursion_predictions[:,:,:,:] = torch.argmax(logits[:,:,:,:,-self.recursive_slices:], dim=1)
+			if self.recursive_slices > 0 :
+				prev_recursion_predictions[:,:,:,:] = torch.argmax(logits[:,:,:,:,-self.recursive_slices:], dim=1)
 
 		y = batch["label"] 
 		if y != None :

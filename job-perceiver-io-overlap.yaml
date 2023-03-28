@@ -26,8 +26,7 @@ spec:
             - name: dshm
               mountPath: /dev/shm
       nodeSelector:
-        node-cuda: '11'
-        node-gpu/memory: '24'
+        node-gpu: rtx3090
       restartPolicy: Never
       securityContext:
         runAsUser: 1001940000

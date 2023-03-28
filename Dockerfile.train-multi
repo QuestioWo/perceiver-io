@@ -19,29 +19,23 @@ COPY perceiver ./perceiver
 RUN echo "import torch; f = open('/dev/shm/num_gpus', 'w'); print(torch.cuda.device_count(), file=f, end='')" > ./perceiver/device_counter.py
 
 CMD ["/bin/bash", "-c", "python -m perceiver.device_counter && \
-rm -r /volume/logs_optimisation | true && \
-mkdir -p /volume/logs_optimisation && \
-mkdir -p /volume/logs_optimisation/miccai_seg_optimisation && \
-rm -r /volume/results/ && \
-mkdir -p /volume/results/ && \
-rm -f /volume/log_optimisation.txt && \
-rm -f /volume/ng_optimiser.pkl && \
-rsync -Pa /volume/amos22 /dev/shm && \
-python -m perceiver.scripts.segmentation.automated_mapper \
+mkdir -p /volume/logs_optimal_multi && \
+mkdir -p /volume/logs_optimal_multi/miccai_seg_optimal_multi && \
+python -m perceiver.scripts.segmentation.mapper \
 fit \
 --optimizer=AdamW \
 --optimizer.lr=5e-4 \
---trainer.max_epochs=20 \
+--trainer.max_epochs=350 \
 --trainer.strategy='dp' \
 --trainer.precision=32 \
 --trainer.logger=TensorBoardLogger \
---trainer.logger.save_dir=/volume/logs_optimisation \
---trainer.logger.name=miccai_seg_optimisation \
+--trainer.logger.save_dir=/volume/logs_optimal_multi \
+--trainer.logger.name=miccai_seg_optimal_multi \
 --data=MICCAIDataModule \
---data.batch_size=3 \
+--data.batch_size=$(cat /dev/shm/num_gpus) \
 --data.num_workers=8 \
---data.dataset_dir=/dev/shm/amos22 \
+--data.dataset_dir=/volume/amos22 \
 --trainer.log_every_n_steps=1 \
 --trainer.check_val_every_n_epoch=1 \
 --trainer.accelerator=gpu \
---trainer.devices='0,2,3' 2>&1 | tee /volume/log_optimisation.txt"]
+--trainer.devices=$(cat /dev/shm/num_gpus) 2>&1 | tee -a /volume/log_optimal_multi.txt"]

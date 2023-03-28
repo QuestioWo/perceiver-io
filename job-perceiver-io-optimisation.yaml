@@ -1,13 +1,13 @@
 ﻿apiVersion: batch/v1
 kind: Job
 metadata:
-  name: perceiver-io-optimisation
+  name: perceiver-io-optimisation-3090
   namespace: msc23jimproject
 spec:
   selector: {}
   template:
     metadata:
-      name: perceiver-io-optimisation
+      name: perceiver-io-optimisation-3090
     spec:
       volumes:
         - name: fullvolume
@@ -26,8 +26,7 @@ spec:
             - name: dshm
               mountPath: /dev/shm
       nodeSelector:
-        node-cuda: '11'
-        node-gpu/memory: '24'
+        node-gpu: rtx3090
       restartPolicy: Never
       securityContext:
         runAsUser: 1001940000
