@@ -24,23 +24,23 @@ USE_CUDA = True
 COLS, ROWS = 5, 5
 
 DEFAULT_LOGS = os.path.join('logs_optimal_multi', 'miccai_seg_optimal_multi')
-LOAD_SPECIFIC_VERSION = 'version_33'
+LOAD_SPECIFIC_VERSION = 'final'
 USE_LAST_CHECKPOINT = True
 
-GENERATE_MICCAI_TEST_RESULTS = False
+GENERATE_MICCAI_TEST_RESULTS = True
 SAVE_PREDICTIONS = GENERATE_MICCAI_TEST_RESULTS or True
 SAVE_PREDICTIONS_DIR = "results"
 COMPUTE_METRICS = not GENERATE_MICCAI_TEST_RESULTS and True
 COMPUTE_INFERENCE_TIMES = True
-COREGISTER_IMAGES = not GENERATE_MICCAI_TEST_RESULTS and False
+COREGISTER_IMAGES = GENERATE_MICCAI_TEST_RESULTS or False
 
 DISPLAY_DIFFS = not GENERATE_MICCAI_TEST_RESULTS and False
 DEFAULT_SLICE = 42
 DISPLAY_UPSCALED_INFERENCE_RESULTS = False
 DISPLAY_ANY_RESULTS = False
 
-CT_ONLY_INF = 0
-DATASET_INFERENCE = 'val'
+CT_ONLY_INF = 1
+DATASET_INFERENCE = 'test'
 
 def atoi(text):
 	return int(text) if text.isdigit() else text
@@ -176,7 +176,9 @@ def load_and_preprocess_data(generate_test_results:bool=GENERATE_MICCAI_TEST_RES
 
 	if coregister_loaded_images :
 		print("Coregistering scans for inference...")
-		coregistered_images = [coregister_image(sitk.Cast(segmentation_objects[i]['image'], sitk.sitkFloat32), segmentation_dataset.get_coregistration_image()) for i in tqdm(range(len(segmentation_objects)))]
+		coreg: sitk.Image = segmentation_dataset.get_coregistration_image()
+		coregistered_images = [coregister_image(sitk.Cast(segmentation_objects[i]['image'], sitk.sitkFloat64), coreg) for i in tqdm(range(len(segmentation_objects)))]
+		coregistered_images = [(sitk.Cast(coregistered_images[i][0], sitk.sitkFloat32), coregistered_images[i][1], coregistered_images[i][2], coregistered_images[i][3]) for i in tqdm(range(len(coregistered_images)))]
 	else :
 		print("Loading precoregistered scans for inference...")
 	
