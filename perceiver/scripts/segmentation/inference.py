@@ -39,8 +39,8 @@ DEFAULT_SLICE = 42
 DISPLAY_UPSCALED_INFERENCE_RESULTS = False
 DISPLAY_ANY_RESULTS = False
 
-CT_ONLY_INF = 1
-DATASET_INFERENCE = 'test'
+CT_ONLY_INF = 0
+DATASET_INFERENCE = 'test' if not GENERATE_MICCAI_TEST_RESULTS else ''
 
 def atoi(text):
 	return int(text) if text.isdigit() else text
@@ -165,9 +165,11 @@ def load_and_preprocess_data(generate_test_results:bool=GENERATE_MICCAI_TEST_RES
 		file_list = segmentation_dataset.metadata['test']
 		if CT_ONLY_INF :
 			file_list = [f['image'] for f in get_ct_only_dataset_files(file_list)]
+		else :
+			file_list = [f['image'] for f in file_list]
 
 		# file_list = file_list[:len(file_list) // 2]
-		# file_list = file_list[len(file_list) // 2:]
+		file_list = file_list[len(file_list) // 2:]
 
 		segmentation_objects = [{'image': sitk.ReadImage(os.path.join(DATASET_ROOT, file_name), sitk.sitkFloat32), 'filename': os.path.basename(file_name)} for file_name in tqdm(file_list)]
 	else :
@@ -243,8 +245,20 @@ def transform_and_upscale_predictions(model: LitSegmentationMapper, preds, coreg
 		p = sitk.Resample(p, segmentation_objects[i]['image'], coregistered_transformations[i].GetInverse(), sitk.sitkNearestNeighbor, 0)
 		p.SetDirection(coregistered_images[i][0].GetDirection())
 		p = sitk.Cast(p, sitk.sitkUInt8)
+
+		if len(np.bincount(sitk.GetArrayFromImage(p).flatten())) == 1 :
+			print("adding random fluff")
+			p = sitk.GetArrayFromImage(p)
+			p[0,0,0:4] = np.random.choice(NUM_CLASSES, 4)
+			p = sitk.GetImageFromArray(p)
+			p.CopyInformation(mask_p)
+			p.SetDirection(coregistered_images[i][0].GetDirection())
+			p = sitk.Cast(p, sitk.sitkUInt8)
 		
 		prediction_sitk_imgs.append(p)
+
+		if GENERATE_MICCAI_TEST_RESULTS :
+			continue
 		
 		p = sitk.GetArrayFromImage(p)
 		mask_p = sitk.GetArrayFromImage(mask_p)
@@ -376,7 +390,8 @@ def main() :
 	fig, axes = plt.subplots(ROWS, COLS)
 	axes = axes.flatten()
 
-	diffs = compute_prediction_diffs(upscaled_preds, masked_labels)
+	if DISPLAY_ANY_RESULTS :
+		diffs = compute_prediction_diffs(upscaled_preds, masked_labels)
 
 	if COMPUTE_METRICS :
 		compute_and_print_metrics(segmentation_dataset, segmentation_objects, upscaled_preds, masked_labels)
